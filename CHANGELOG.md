@@ -47,9 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - CORS configuration with flexible origin validation
 - Automatic backpressure handling and message queuing
 - Manual gateway registration via `registerGateway()`
-- Comprehensive test coverage
-  - 248 total tests (209 unit tests, 39 integration tests)
+- Comprehensive test coverage with unit and integration tests
   - Separate test scripts for unit and integration tests
+  - Full test suite with high coverage
 - Complete documentation
   - Comprehensive README with quick start guide
   - Full API reference documentation

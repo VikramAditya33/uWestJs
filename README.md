@@ -1,10 +1,14 @@
+<p align="center">
+  <img src="uWestJS.png" alt="uWestJS Logo" width="200"/>
+</p>
+
 # uWestJS
 
 > High-performance WebSocket adapter for NestJS using uWebSockets.js
 
-[![npm version](https://badge.fury.io/js/uwestjs.svg)](https://www.npmjs.com/package/uwestjs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)](https://nodejs.org)
+[![CodeFactor](https://www.codefactor.io/repository/github/vikramaditya33/uwestjs/badge)](https://www.codefactor.io/repository/github/vikramaditya33/uwestjs)
 
 uWestJS is a drop-in replacement for the default NestJS WebSocket adapter, powered by [uWebSockets.js](https://github.com/uNetworking/uWebSockets.js). It provides significantly better performance while maintaining full compatibility with NestJS decorators and patterns you already know.
 
@@ -170,7 +174,7 @@ const adapter = new UwsAdapter(app, {
   
   // CORS configuration
   cors: {
-    origin: '*',
+    origin: 'https://example.com', // Specific origin for security
     credentials: true,
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -183,12 +187,15 @@ const adapter = new UwsAdapter(app, {
 Control cross-origin access to your WebSocket server:
 
 ```typescript
-// Allow all origins
+// Specific origin (recommended for production)
 cors: {
-  origin: '*',
+  origin: 'https://example.com',
 }
 
-// Allow specific origin
+// Allow all origins (use only for development/testing)
+cors: { origin: '*' }
+
+// Allow multiple origins
 cors: {
   origin: 'https://example.com',
 }
@@ -198,7 +205,7 @@ cors: {
   origin: ['https://example.com', 'https://app.example.com'],
 }
 
-// Dynamic origin validation
+// Dynamic origin validation (recommended for flexible security)
 cors: {
   origin: (origin) => {
     return origin?.endsWith('.example.com') ?? false;
@@ -206,6 +213,8 @@ cors: {
   credentials: true,
 }
 ```
+
+**Security Note:** Never use `origin: '*'` with `credentials: true` in production. This combination is a security risk as it allows any origin to make authenticated requests. Always specify exact origins or use a validation function.
 
 ### Dependency Injection Support
 
@@ -234,8 +243,15 @@ export class WsAuthGuard implements CanActivate {
   constructor(private jwtService: JwtService) {}
   
   canActivate(context: any): boolean {
-    const token = context.args[1]?.token;
-    return this.jwtService.verify(token);
+    try {
+      const token = context.args[1]?.token;
+      if (!token) return false;
+      
+      this.jwtService.verify(token);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 ```
@@ -297,10 +313,9 @@ import { BaseWsExceptionFilter } from '@nestjs/websockets';
 export class WsExceptionFilter extends BaseWsExceptionFilter {
   catch(exception: any, host: ArgumentsHost) {
     const client = host.switchToWs().getClient();
-    client.send(JSON.stringify({
-      event: 'error',
+    client.emit('error', {
       message: exception.message,
-    }));
+    });
   }
 }
 

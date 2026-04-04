@@ -14,8 +14,7 @@ function applyMessageBodyDecorator(
   data?: string
 ): void {
   // Check if target IS the prototype (not an instance)
-  const isPrototype =
-    target.constructor && (target.constructor as { prototype?: unknown }).prototype === target;
+  const isPrototype = target.constructor?.prototype === target;
   const metadataTarget = isPrototype ? target : Object.getPrototypeOf(target);
 
   const existingParams = Reflect.getMetadata(PARAM_ARGS_METADATA, metadataTarget, methodName) || [];

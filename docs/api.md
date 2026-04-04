@@ -772,7 +772,7 @@ CORS configuration for WebSocket connections.
 ```typescript
 new UwsAdapter(app, {
   cors: {
-    origin: '*',
+    origin: 'https://example.com', // Specific origin for security
     credentials: true,
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -811,7 +811,15 @@ class WsAuthGuard implements CanActivate {
   constructor(private jwtService: JwtService) {} // DI works!
   
   canActivate(context: any): boolean {
-    return this.jwtService.verify(context.args[1]?.token);
+    try {
+      const token = context.args[1]?.token;
+      if (!token) return false;
+      
+      this.jwtService.verify(token);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 ```
@@ -846,16 +854,19 @@ Allowed origins. Can be a string, array of strings, or a function that returns b
 **Examples:**
 
 ```typescript
-// Allow all origins
+// Specific origin (recommended for production)
+cors: { origin: 'https://example.com' }
+
+// Allow all origins (use only for development/testing)
 cors: { origin: '*' }
 
-// Allow specific origin
+// Allow multiple origins
 cors: { origin: 'https://example.com' }
 
 // Allow multiple origins
 cors: { origin: ['https://example.com', 'https://app.example.com'] }
 
-// Dynamic validation
+// Dynamic validation (recommended for flexible security)
 cors: {
   origin: (origin) => {
     // Allow all subdomains of example.com
@@ -863,7 +874,7 @@ cors: {
   }
 }
 
-// Complex validation
+// Complex validation with multiple allowed domains
 cors: {
   origin: (origin) => {
     if (!origin) return false; // Reject null origins
@@ -872,6 +883,8 @@ cors: {
   }
 }
 ```
+
+**Security Warning:** Never use `origin: '*'` with `credentials: true` in production. This combination allows any origin to make authenticated requests, which is a serious security vulnerability. Always specify exact origins or use a validation function.
 
 #### credentials
 
@@ -1365,11 +1378,16 @@ export class ChatGateway {
 ```typescript
 @WebSocketGateway()
 export class NotificationGateway {
+  private clients = new Map<string, UwsSocket>();
+  
   @SubscribeMessage('subscribe-notifications')
   handleSubscribe(
     @MessageBody() topics: string[],
     @ConnectedSocket() client: UwsSocket,
   ) {
+    // Store client reference for later use
+    this.clients.set(client.id, client);
+    
     // Subscribe to multiple notification topics
     topics.forEach(topic => {
       client.join(`notifications:${topic}`);
@@ -1381,13 +1399,57 @@ export class NotificationGateway {
   // Called from a service to send notifications
   sendNotification(topic: string, notification: any) {
     const roomName = `notifications:${topic}`;
-    // Use adapter to broadcast to room
-    this.adapter.broadcast.to(roomName).emit('notification', {
+    
+    // Get any client to use its broadcast capability
+    const anyClient = this.clients.values().next().value;
+    if (anyClient) {
+      anyClient.broadcast.to(roomName).emit('notification', {
+        topic,
+        ...notification,
+      });
+    }
+  }
+  
+  // Clean up on disconnect
+  handleDisconnect(client: UwsSocket) {
+    this.clients.delete(client.id);
+  }
+}
+```
+
+**Alternative Pattern:** If you need to broadcast without a client reference, inject the adapter:
+
+```typescript
+@WebSocketGateway()
+export class NotificationGateway {
+  constructor(
+    @Inject('WS_ADAPTER') private adapter: UwsAdapter
+  ) {}
+  
+  sendNotification(topic: string, notification: any) {
+    // Direct adapter access for broadcasting
+    this.adapter.broadcast.to(`notifications:${topic}`).emit('notification', {
       topic,
       ...notification,
     });
   }
 }
+
+// In your module, provide the adapter:
+@Module({
+  providers: [
+    NotificationGateway,
+    {
+      provide: 'WS_ADAPTER',
+      useFactory: () => {
+        // Return your adapter instance
+        // You'll need to store it during app initialization
+        return globalAdapterInstance;
+      },
+    },
+  ],
+})
+export class AppModule {}
 ```
 
 ### Room Naming Conventions

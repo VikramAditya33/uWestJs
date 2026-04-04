@@ -29,12 +29,16 @@ interface ExtendedWebSocket extends uWS.WebSocket<WebSocketClient> {
  * Unlike standard NestJS WebSocket adapters, bindMessageHandlers() is not used.
  * This design choice provides better control over metadata scanning and handler registration.
  *
+ * Supports multiple gateways - you can register multiple gateway classes, and each will
+ * have its handlers registered independently. This allows you to organize your WebSocket
+ * handlers into logical groups.
+ *
  * Supports dependency injection for guards, pipes, and filters when a ModuleRef is provided.
  * Pass a ModuleRef to enable guards/pipes/filters with constructor dependencies.
  *
  * @example
  * ```typescript
- * // Basic setup with manual gateway registration
+ * // Basic setup with single gateway
  * const app = await NestFactory.create(AppModule);
  * const adapter = new UwsAdapter(app, { port: 8099 });
  * app.useWebSocketAdapter(adapter);
@@ -42,6 +46,25 @@ interface ExtendedWebSocket extends uWS.WebSocket<WebSocketClient> {
  * // Manually register your gateway
  * const gateway = app.get(EventsGateway);
  * adapter.registerGateway(gateway);
+ *
+ * await app.listen(3000);
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Multiple gateways for organized handlers
+ * const app = await NestFactory.create(AppModule);
+ * const adapter = new UwsAdapter(app, { port: 8099 });
+ * app.useWebSocketAdapter(adapter);
+ *
+ * // Register multiple gateways
+ * const chatGateway = app.get(ChatGateway);
+ * const gameGateway = app.get(GameGateway);
+ * const notificationGateway = app.get(NotificationGateway);
+ *
+ * adapter.registerGateway(chatGateway);
+ * adapter.registerGateway(gameGateway);
+ * adapter.registerGateway(notificationGateway);
  *
  * await app.listen(3000);
  * ```
@@ -57,7 +80,7 @@ interface ExtendedWebSocket extends uWS.WebSocket<WebSocketClient> {
  * });
  * app.useWebSocketAdapter(adapter);
  *
- * // Manually register your gateway
+ * // Register your gateways
  * const gateway = app.get(EventsGateway);
  * adapter.registerGateway(gateway);
  *
@@ -83,7 +106,7 @@ export class UwsAdapter implements WebSocketAdapter {
   private readonly handlerExecutor: HandlerExecutor;
   private readonly roomManager = new RoomManager();
   private readonly lifecycleHooksManager = new LifecycleHooksManager();
-  private gatewayInstance?: object;
+  private readonly gateways = new Map<string, object>(); // Support multiple gateways
   private bindMessageHandlersCalled = false;
 
   constructor(appInstance: unknown, options?: UwsAdapterOptions) {
@@ -150,10 +173,10 @@ export class UwsAdapter implements WebSocketAdapter {
           this.sockets.set(id, socket);
 
           try {
-            // Call lifecycle hook
-            if (this.gatewayInstance) {
-              this.lifecycleHooksManager.callConnectionHook(this.gatewayInstance, extWs);
-            }
+            // Call lifecycle hooks for all registered gateways
+            this.gateways.forEach((gateway) => {
+              this.lifecycleHooksManager.callConnectionHook(gateway, extWs);
+            });
 
             if (this.wsHandler) {
               this.wsHandler.handleConnection(extWs);
@@ -201,10 +224,10 @@ export class UwsAdapter implements WebSocketAdapter {
           }
 
           try {
-            // Call lifecycle hook
-            if (this.gatewayInstance) {
-              this.lifecycleHooksManager.callDisconnectHook(this.gatewayInstance, extWs);
-            }
+            // Call lifecycle hooks for all registered gateways
+            this.gateways.forEach((gateway) => {
+              this.lifecycleHooksManager.callDisconnectHook(gateway, extWs);
+            });
 
             if (this.wsHandler) {
               this.wsHandler.handleDisconnect(extWs);
@@ -238,6 +261,7 @@ export class UwsAdapter implements WebSocketAdapter {
 
   /**
    * Manually register a gateway for message handling
+   * Supports multiple gateways - each gateway's handlers are registered independently
    * Call this after app.useWebSocketAdapter() but before app.listen()
    * @param gateway - The gateway instance to register
    */
@@ -247,24 +271,25 @@ export class UwsAdapter implements WebSocketAdapter {
       return;
     }
 
-    this.logger.log(`Registering gateway: ${gateway.constructor?.name || 'Unknown'}`);
+    const gatewayName = gateway.constructor?.name || 'Unknown';
+    this.logger.log(`Registering gateway: ${gatewayName}`);
 
-    if (this.gatewayInstance) {
+    // Check if gateway is already registered
+    if (this.gateways.has(gatewayName)) {
       this.logger.warn(
-        `Overwriting existing gateway ${this.gatewayInstance.constructor?.name} with ${gateway.constructor?.name}`
+        `Gateway ${gatewayName} is already registered. Skipping duplicate registration.`
       );
+      return;
     }
 
     // Store gateway instance
-    this.gatewayInstance = gateway;
+    this.gateways.set(gatewayName, gateway);
 
     // Scan gateway for @SubscribeMessage decorators
     const handlers = this.metadataScanner.scanForMessageHandlers(gateway);
 
     if (handlers.length === 0) {
-      this.logger.warn(
-        `No @SubscribeMessage handlers found in gateway ${gateway.constructor?.name}`
-      );
+      this.logger.warn(`No @SubscribeMessage handlers found in gateway ${gatewayName}`);
       return;
     }
 
@@ -272,7 +297,7 @@ export class UwsAdapter implements WebSocketAdapter {
     this.messageRouter.registerHandlers(handlers);
 
     this.logger.log(
-      `Registered ${handlers.length} message handlers: ${handlers.map((h) => h.message).join(', ')}`
+      `Registered ${handlers.length} message handlers from ${gatewayName}: ${handlers.map((h) => h.message).join(', ')}`
     );
 
     // Call afterInit lifecycle hook
@@ -304,15 +329,17 @@ export class UwsAdapter implements WebSocketAdapter {
     handlers: MessageMappingProperties[],
     _transform: (data: unknown) => Observable<unknown>
   ): void {
-    // Warn on first call to alert developers about manual registration requirement
-    if (!this.bindMessageHandlersCalled) {
-      this.bindMessageHandlersCalled = true;
+    // Warn on first call only if no gateways have been registered yet
+    // This prevents false warnings when developers correctly use registerGateway()
+    if (!this.bindMessageHandlersCalled && this.gateways.size === 0) {
       this.logger.warn(
         'bindMessageHandlers() is not used by UwsAdapter. ' +
           'Please call adapter.registerGateway(gateway) manually after app.useWebSocketAdapter(). ' +
           'See class documentation for examples.'
       );
     }
+
+    this.bindMessageHandlersCalled = true;
 
     this.logger.debug(
       `bindMessageHandlers called (ignored) - gateway: ${gateway?.constructor?.name}, handlers: ${handlers?.length || 0}`
@@ -396,7 +423,14 @@ export class UwsAdapter implements WebSocketAdapter {
     const message = this.serializeMessage(data, 'broadcast');
     if (!message) return;
 
-    this.sendToMultipleClients(this.clients, message);
+    const dropped = this.sendToMultipleClients(this.clients, message);
+
+    // Log warning if messages were dropped due to backpressure
+    if (dropped > 0) {
+      this.logger.warn(
+        `Broadcast backpressure: ${dropped} message(s) dropped out of ${this.clients.size} clients`
+      );
+    }
   }
 
   /**
@@ -452,19 +486,26 @@ export class UwsAdapter implements WebSocketAdapter {
       if (client) clientMap.set(clientId, client);
     });
 
-    this.sendToMultipleClients(clientMap, message);
+    const dropped = this.sendToMultipleClients(clientMap, message);
+
+    // Log warning if messages were dropped due to backpressure
+    if (dropped > 0) {
+      this.logger.warn(
+        `Room broadcast backpressure: ${dropped} message(s) dropped out of ${clientMap.size} clients`
+      );
+    }
   }
 
   /**
    * Handle decorator-based message routing
-   * Parses incoming message and routes to appropriate handler
+   * Parses incoming message and routes to appropriate handler across all registered gateways
    */
   private async handleDecoratorBasedMessage(
     client: ExtendedWebSocket,
     rawData: string
   ): Promise<void> {
-    // Only process if we have a gateway instance and handlers registered
-    if (!this.gatewayInstance || this.messageRouter.getHandlerCount() === 0) {
+    // Only process if we have gateways registered and handlers available
+    if (this.gateways.size === 0 || this.messageRouter.getHandlerCount() === 0) {
       return;
     }
 
@@ -484,10 +525,10 @@ export class UwsAdapter implements WebSocketAdapter {
         return;
       }
 
-      // Find the method name for this event
-      const methodName = this.findMethodNameForEvent(parsedMessage.event);
-      if (!methodName) {
-        this.logger.warn(`Could not find method name for event: ${parsedMessage.event}`);
+      // Find the gateway and method name for this event
+      const handlerInfo = this.findHandlerForEvent(parsedMessage.event);
+      if (!handlerInfo) {
+        this.logger.warn(`Could not find handler for event: ${parsedMessage.event}`);
         return;
       }
 
@@ -506,8 +547,8 @@ export class UwsAdapter implements WebSocketAdapter {
 
       // Execute handler with proper parameter injection
       const executionResult = await this.handlerExecutor.execute(
-        this.gatewayInstance,
-        methodName,
+        handlerInfo.gateway,
+        handlerInfo.methodName,
         wrappedSocket,
         parsedMessage.data
       );
@@ -531,12 +572,17 @@ export class UwsAdapter implements WebSocketAdapter {
   }
 
   /**
-   * Find the method name for a given event
-   * This is a helper to map event names back to method names
+   * Find the gateway and method name for a given event
+   * Searches through all registered gateways
    */
-  private findMethodNameForEvent(event: string): string | null {
-    if (!this.gatewayInstance) return null;
-    return this.metadataScanner.getMethodNameForEvent(this.gatewayInstance, event);
+  private findHandlerForEvent(event: string): { gateway: object; methodName: string } | null {
+    for (const gateway of this.gateways.values()) {
+      const methodName = this.metadataScanner.getMethodNameForEvent(gateway, event);
+      if (methodName) {
+        return { gateway, methodName };
+      }
+    }
+    return null;
   }
 
   /**
@@ -605,32 +651,25 @@ export class UwsAdapter implements WebSocketAdapter {
   }
 
   /**
-   * Send message to multiple clients and track statistics
+   * Send message to multiple clients and track dropped messages
    * @internal
+   * @returns Number of messages dropped due to backpressure
    */
-  private sendToMultipleClients(
-    clients: Map<string, ExtendedWebSocket>,
-    message: string
-  ): { success: number; dropped: number; failed: number } {
-    let success = 0;
+  private sendToMultipleClients(clients: Map<string, ExtendedWebSocket>, message: string): number {
     let dropped = 0;
-    let failed = 0;
 
     clients.forEach((client, id) => {
       try {
         const result = client.send(message);
         if (result === 2) {
           dropped++;
-        } else {
-          success++;
         }
       } catch (error) {
         this.logger.error(`Failed to send to client ${id}: ${this.formatError(error)}`);
-        failed++;
       }
     });
 
-    return { success, dropped, failed };
+    return dropped;
   }
 
   /**

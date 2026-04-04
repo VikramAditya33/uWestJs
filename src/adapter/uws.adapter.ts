@@ -57,6 +57,7 @@ export class UwsAdapter implements WebSocketAdapter {
   private sockets = new Map<string, UwsSocketImpl>(); // Track wrapped sockets
   private readonly logger = new Logger(UwsAdapter.name);
   private readonly options: ResolvedUwsAdapterOptions;
+  private readonly appInstance: unknown;
   private wsHandler?: {
     handleConnection: (ws: ExtendedWebSocket) => void;
     handleMessage: (ws: ExtendedWebSocket, data: string) => void;
@@ -71,7 +72,10 @@ export class UwsAdapter implements WebSocketAdapter {
   private readonly lifecycleHooksManager = new LifecycleHooksManager();
   private gatewayInstance?: object;
 
-  constructor(_appInstance: unknown, options?: UwsAdapterOptions) {
+  constructor(appInstance: unknown, options?: UwsAdapterOptions) {
+    // Store app instance to potentially access gateways later
+    this.appInstance = appInstance;
+
     // Apply default options
     // Note: port will be set in create() using NestJS-provided port as fallback
     this.options = {
@@ -87,6 +91,7 @@ export class UwsAdapter implements WebSocketAdapter {
     this.handlerExecutor = new HandlerExecutor({ moduleRef: options?.moduleRef });
 
     this.logger.log('UwsAdapter initialized');
+    this.logger.debug(`App instance type: ${appInstance?.constructor?.name || 'unknown'}`);
   }
 
   /**
@@ -225,31 +230,28 @@ export class UwsAdapter implements WebSocketAdapter {
   }
 
   /**
-   * Bind message handlers (NestJS decorator-based routing)
-   * Scans the gateway for @SubscribeMessage decorators and sets up routing
-   *
-   * @param client - The gateway instance
-   * @param handlers - Message mapping properties (not used, we scan for decorators)
-   * @param transform - Transform function (not used in this implementation)
+   * Manually register a gateway for message handling
+   * Call this after app.useWebSocketAdapter() but before app.listen()
+   * @param gateway - The gateway instance to register
    */
-  bindMessageHandlers(
-    gateway: unknown,
-    _handlers: MessageMappingProperties[],
-    _transform: (data: unknown) => Observable<unknown>
-  ): void {
-    if (!gateway || typeof gateway !== 'object') {
-      this.logger.warn('Invalid gateway instance provided to bindMessageHandlers');
+  registerGateway(gateway: object): void {
+    if (!gateway) {
+      this.logger.warn('Cannot register null or undefined gateway');
       return;
     }
 
-    // Store gateway instance for later use
+    this.logger.log(`Registering gateway: ${gateway.constructor?.name || 'Unknown'}`);
+
+    // Store gateway instance
     this.gatewayInstance = gateway;
 
     // Scan gateway for @SubscribeMessage decorators
     const handlers = this.metadataScanner.scanForMessageHandlers(gateway);
 
     if (handlers.length === 0) {
-      this.logger.debug('No @SubscribeMessage handlers found in gateway');
+      this.logger.warn(
+        `No @SubscribeMessage handlers found in gateway ${gateway.constructor?.name}`
+      );
       return;
     }
 
@@ -257,11 +259,31 @@ export class UwsAdapter implements WebSocketAdapter {
     this.messageRouter.registerHandlers(handlers);
 
     this.logger.log(
-      `Registered ${handlers.length} message handlers from gateway: ${handlers.map((h) => h.message).join(', ')}`
+      `Registered ${handlers.length} message handlers: ${handlers.map((h) => h.message).join(', ')}`
     );
 
     // Call afterInit lifecycle hook
     this.lifecycleHooksManager.callInitHook(gateway, this.app);
+  }
+
+  /**
+   * Bind message handlers (NestJS decorator-based routing)
+   * We don't use this - we use registerGateway() instead for self-scanning
+   *
+   * @param gateway - The gateway instance (or client)
+   * @param handlers - Message mapping properties (ignored)
+   * @param _transform - Transform function (ignored)
+   */
+  bindMessageHandlers(
+    gateway: unknown,
+    handlers: MessageMappingProperties[],
+    _transform: (data: unknown) => Observable<unknown>
+  ): void {
+    // We use registerGateway() for our self-scanning approach
+    // This method is called by NestJS but we ignore it
+    this.logger.debug(
+      `bindMessageHandlers called (ignored) - gateway: ${gateway?.constructor?.name}, handlers: ${handlers?.length || 0}`
+    );
   }
 
   /**
@@ -442,11 +464,28 @@ export class UwsAdapter implements WebSocketAdapter {
         return;
       }
 
+      // Get the wrapped socket (UwsSocketImpl) instead of raw client
+      const clientId = client.id;
+      if (!clientId) {
+        this.logger.warn('Client has no ID, cannot get wrapped socket');
+        return;
+      }
+
+      const wrappedSocket = this.sockets.get(clientId);
+      if (!wrappedSocket) {
+        this.logger.warn(`No wrapped socket found for client ${clientId}`);
+        return;
+      }
+
+      this.logger.debug(
+        `Using wrapped socket for client ${clientId}, has join: ${typeof wrappedSocket.join}`
+      );
+
       // Execute handler with proper parameter injection
       const executionResult = await this.handlerExecutor.execute(
         this.gatewayInstance,
         methodName,
-        client,
+        wrappedSocket,
         parsedMessage.data
       );
 

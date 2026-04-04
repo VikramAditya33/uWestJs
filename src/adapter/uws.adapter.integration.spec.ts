@@ -3,13 +3,15 @@ import { PARAM_ARGS_METADATA, ParamType } from '../decorators';
 import 'reflect-metadata';
 import { UwsSocketImpl } from '../socket/uws-socket';
 
-const MESSAGE_MAPPING_METADATA = 'microservices:message_mapping';
+const MESSAGE_MAPPING_METADATA = 'websockets:message_mapping';
+const MESSAGE_METADATA = 'message';
 
 /**
  * Helper to add @SubscribeMessage metadata to a method
  */
 function addMessageMetadata(target: object, event: string): void {
-  Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, event, target);
+  Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, true, target);
+  Reflect.defineMetadata(MESSAGE_METADATA, event, target);
 }
 
 /**
@@ -20,7 +22,7 @@ function addParamMetadata(
   methodName: string,
   params: Array<{ index: number; type: ParamType }>
 ): void {
-  Reflect.defineMetadata(PARAM_ARGS_METADATA, params, target.constructor, methodName);
+  Reflect.defineMetadata(PARAM_ARGS_METADATA, params, target, methodName);
 }
 
 class TestGateway {
@@ -55,13 +57,10 @@ addParamMetadata(TestGateway.prototype, 'handlePing', [
   { index: 0, type: ParamType.CONNECTED_SOCKET },
   { index: 1, type: ParamType.MESSAGE_BODY },
 ]);
-
 addParamMetadata(TestGateway.prototype, 'handleEcho', [{ index: 0, type: ParamType.MESSAGE_BODY }]);
-
 addParamMetadata(TestGateway.prototype, 'handleError', [
   { index: 0, type: ParamType.MESSAGE_BODY },
 ]);
-
 addParamMetadata(TestGateway.prototype, 'handleNoResponse', [
   { index: 0, type: ParamType.MESSAGE_BODY },
 ]);
@@ -69,11 +68,27 @@ addParamMetadata(TestGateway.prototype, 'handleNoResponse', [
 /**
  * Helper to create a mock WebSocket client
  */
-function createMockClient() {
+function createMockClient(id = 'test-client') {
   return {
-    id: 'test-client',
+    id,
     send: jest.fn(),
     close: jest.fn(),
+  };
+}
+
+/**
+ * Helper to create a mock wrapped socket
+ */
+function createMockWrappedSocket(id = 'test-client') {
+  return {
+    id,
+    emit: jest.fn(),
+    broadcast: { emit: jest.fn() },
+    to: jest.fn(),
+    join: jest.fn(),
+    leave: jest.fn(),
+    leaveAll: jest.fn(),
+    rooms: new Set<string>(),
   };
 }
 
@@ -90,9 +105,9 @@ describe('UwsAdapter Integration with Router', () => {
     adapter?.dispose();
   });
 
-  describe('bindMessageHandlers', () => {
+  describe('registerGateway', () => {
     it('should scan and register handlers from gateway', () => {
-      adapter.bindMessageHandlers(gateway, [], () => null as any);
+      adapter.registerGateway(gateway);
 
       // Verify handlers were actually registered
       const messageRouter = (adapter as any).messageRouter;
@@ -104,7 +119,7 @@ describe('UwsAdapter Integration with Router', () => {
     });
 
     it('should handle invalid gateway instance', () => {
-      expect(() => adapter.bindMessageHandlers(null, [], () => null as any)).not.toThrow();
+      expect(() => adapter.registerGateway(null as any)).not.toThrow();
       expect(() => adapter.bindMessageHandlers(undefined, [], () => null as any)).not.toThrow();
       expect(() =>
         adapter.bindMessageHandlers('not an object', [], () => null as any)
@@ -116,18 +131,20 @@ describe('UwsAdapter Integration with Router', () => {
       const emptyGateway = new EmptyGateway();
 
       expect(() => {
-        adapter.bindMessageHandlers(emptyGateway, [], () => null as any);
+        adapter.registerGateway(emptyGateway);
       }).not.toThrow();
     });
   });
 
   describe('decorator-based message routing', () => {
     beforeEach(() => {
-      adapter.bindMessageHandlers(gateway, [], () => null as any);
+      adapter.registerGateway(gateway);
     });
 
     it('should route messages to correct handlers with parameters', async () => {
       const mockClient = createMockClient();
+      const mockWrappedSocket = createMockWrappedSocket();
+      (adapter as any).sockets.set('test-client', mockWrappedSocket);
 
       await (adapter as any).handleDecoratorBasedMessage(
         mockClient,
@@ -150,12 +167,15 @@ describe('UwsAdapter Integration with Router', () => {
         JSON.stringify({ event: 'ping', data: { timestamp: 123456 } })
       );
       expect(gateway.receivedMessages[0].event).toBe('ping');
-      expect(gateway.receivedMessages[0].client).toBe(mockClient);
+      // The handler receives the wrapped socket, not the raw client
+      expect(gateway.receivedMessages[0].client).toBe(mockWrappedSocket);
       expect(mockClient.send).toHaveBeenCalled();
     });
 
     it('should handle errors and no-response handlers', async () => {
       const mockClient = createMockClient();
+      const mockWrappedSocket = createMockWrappedSocket();
+      (adapter as any).sockets.set('test-client', mockWrappedSocket);
 
       await (adapter as any).handleDecoratorBasedMessage(
         mockClient,
@@ -218,13 +238,10 @@ describe('UwsAdapter Integration with Router', () => {
     });
 
     it('should handle send errors gracefully', () => {
-      const mockClient = {
-        id: 'test-client',
-        send: jest.fn(() => {
-          throw new Error('Send failed');
-        }),
-        close: jest.fn(),
-      };
+      const mockClient = createMockClient();
+      mockClient.send.mockImplementation(() => {
+        throw new Error('Send failed');
+      });
 
       expect(() => {
         (adapter as any).sendResponse(mockClient, 'test-event', { data: 'test' });

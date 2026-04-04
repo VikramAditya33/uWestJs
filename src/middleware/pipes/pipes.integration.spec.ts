@@ -44,7 +44,8 @@ async function executeHandler(
   const gateway = new gatewayClass();
 
   // Apply parameter decorator metadata (check for duplicates)
-  const existingParams = Reflect.getMetadata(PARAM_ARGS_METADATA, gatewayClass, methodName) || [];
+  const existingParams =
+    Reflect.getMetadata(PARAM_ARGS_METADATA, gatewayClass.prototype, methodName) || [];
 
   const alreadyExists = existingParams.some(
     (p: { index: number; type: ParamType }) => p.index === 0 && p.type === ParamType.MESSAGE_BODY
@@ -52,13 +53,15 @@ async function executeHandler(
 
   if (!alreadyExists) {
     const newParams = [...existingParams, { index: 0, type: ParamType.MESSAGE_BODY }];
-    Reflect.defineMetadata(PARAM_ARGS_METADATA, newParams, gatewayClass, methodName);
+    Reflect.defineMetadata(PARAM_ARGS_METADATA, newParams, gatewayClass.prototype, methodName);
   }
 
-  // Apply parameter pipes
-  if (paramPipes.length > 0) {
-    const existingPipes: Map<number, Type<PipeTransform>[]> =
-      Reflect.getMetadata(`${PIPES_METADATA}:params`, gatewayClass, methodName) || new Map();
+  // Apply parameter pipes (create entry even if empty so method/class pipes can be applied)
+  const existingPipes: Map<number, Type<PipeTransform>[]> =
+    Reflect.getMetadata(`${PIPES_METADATA}:params`, gatewayClass, methodName) || new Map();
+
+  if (paramPipes.length > 0 || methodPipes || classPipes) {
+    // Set param pipes (empty array if no param-specific pipes)
     existingPipes.set(0, paramPipes);
     Reflect.defineMetadata(`${PIPES_METADATA}:params`, existingPipes, gatewayClass, methodName);
   }

@@ -116,6 +116,8 @@ export class PipeExecutor {
    * @returns Array of parameters with their pipes
    */
   private getParameterPipes(instance: object, methodName: string): ParamWithPipes[] {
+    const prototype = Object.getPrototypeOf(instance);
+
     const classPipes: Type<PipeTransform>[] =
       Reflect.getMetadata(PIPES_METADATA, instance.constructor) || [];
 
@@ -127,7 +129,7 @@ export class PipeExecutor {
       new Map();
 
     const paramMetadata: Array<{ index: number; type: string; data?: string }> =
-      Reflect.getMetadata(PARAM_ARGS_METADATA, instance.constructor, methodName) || [];
+      Reflect.getMetadata(PARAM_ARGS_METADATA, prototype, methodName) || [];
 
     const allPipes = [...classPipes, ...methodPipes];
     const result: ParamWithPipes[] = [];
@@ -161,18 +163,21 @@ export class PipeExecutor {
 
   /**
    * Instantiates a pipe using the DI container
-   * Falls back to direct instantiation if DI resolution fails
    * @param pipeType - The pipe type
    * @returns Pipe instance
+   * @throws Error if pipe cannot be resolved from DI container
    */
   private instantiatePipe(pipeType: Type<PipeTransform>): PipeTransform {
     try {
       return this.moduleRef.get(pipeType);
-    } catch {
-      this.logger.warn(
-        `Failed to resolve pipe ${pipeType.name} from DI container, falling back to direct instantiation`
+    } catch (error) {
+      this.logger.error(
+        `Failed to resolve pipe ${pipeType.name} from DI container: ${this.formatError(error)}`
       );
-      return new pipeType();
+      throw new Error(
+        `Cannot instantiate pipe ${pipeType.name}. Ensure it is registered as a provider in your module.`,
+        { cause: error }
+      );
     }
   }
 

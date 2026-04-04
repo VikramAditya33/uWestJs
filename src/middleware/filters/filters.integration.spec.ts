@@ -13,8 +13,14 @@ function applyMessageBodyDecorator(
   paramIndex: number,
   data?: string
 ): void {
-  const existingParams =
-    Reflect.getMetadata(PARAM_ARGS_METADATA, target.constructor, methodName) || [];
+  // If target is already a prototype (has constructor property), use it directly
+  // Otherwise get the prototype from the instance
+  const metadataTarget =
+    'constructor' in target && typeof (target as any).constructor === 'function'
+      ? target
+      : Object.getPrototypeOf(target);
+
+  const existingParams = Reflect.getMetadata(PARAM_ARGS_METADATA, metadataTarget, methodName) || [];
 
   // Check if metadata already exists for this parameter to avoid accumulation
   const alreadyExists = existingParams.some(
@@ -27,7 +33,7 @@ function applyMessageBodyDecorator(
   }
 
   existingParams.push({ index: paramIndex, type: ParamType.MESSAGE_BODY, data });
-  Reflect.defineMetadata(PARAM_ARGS_METADATA, existingParams, target.constructor, methodName);
+  Reflect.defineMetadata(PARAM_ARGS_METADATA, existingParams, metadataTarget, methodName);
 }
 
 /**

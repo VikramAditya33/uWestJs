@@ -2,10 +2,11 @@ import { Logger } from '@nestjs/common';
 import 'reflect-metadata';
 
 /**
- * Metadata key used by @SubscribeMessage decorator
- * This matches NestJS's internal metadata key
+ * Metadata keys used by @SubscribeMessage decorator
+ * These match NestJS's internal metadata keys from @nestjs/websockets
  */
-const MESSAGE_MAPPING_METADATA = 'microservices:message_mapping';
+const MESSAGE_MAPPING_METADATA = 'websockets:message_mapping'; // Flag indicating this is a message handler
+const MESSAGE_METADATA = 'message'; // The actual message pattern/event name
 
 /**
  * Represents a message handler discovered from decorators
@@ -63,9 +64,21 @@ export class MetadataScanner {
 
     for (const methodName of methodNames) {
       const method = prototype[methodName];
-      const messagePattern = Reflect.getMetadata(MESSAGE_MAPPING_METADATA, method);
 
-      if (messagePattern !== undefined) {
+      // Check if this method has the @SubscribeMessage decorator
+      const isMessageHandler = Reflect.getMetadata(MESSAGE_MAPPING_METADATA, method);
+
+      if (isMessageHandler) {
+        // Get the actual message pattern from MESSAGE_METADATA
+        const messagePattern = Reflect.getMetadata(MESSAGE_METADATA, method);
+
+        if (messagePattern === undefined) {
+          this.logger.warn(
+            `Handler ${methodName} has MESSAGE_MAPPING_METADATA but no MESSAGE_METADATA. Skipping.`
+          );
+          continue;
+        }
+
         // Validate message pattern type
         const isValidType =
           typeof messagePattern === 'string' ||

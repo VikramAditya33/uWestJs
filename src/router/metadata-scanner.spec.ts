@@ -1,7 +1,8 @@
 import { MetadataScanner } from './metadata-scanner';
 import 'reflect-metadata';
 
-const MESSAGE_MAPPING_METADATA = 'microservices:message_mapping';
+const MESSAGE_MAPPING_METADATA = 'websockets:message_mapping';
+const MESSAGE_METADATA = 'message';
 
 class TestGateway {
   handleMessage() {
@@ -30,7 +31,9 @@ describe('MetadataScanner', () => {
   let gateway: TestGateway;
 
   const addMetadata = (methodName: keyof TestGateway, message: unknown) => {
-    Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, message, TestGateway.prototype[methodName]);
+    const method = TestGateway.prototype[methodName];
+    Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, true, method);
+    Reflect.defineMetadata(MESSAGE_METADATA, message, method);
   };
 
   const clearAllMetadata = () => {
@@ -42,7 +45,9 @@ describe('MetadataScanner', () => {
       'helperMethod',
     ];
     methods.forEach((method) => {
-      Reflect.deleteMetadata(MESSAGE_MAPPING_METADATA, TestGateway.prototype[method]);
+      const methodRef = TestGateway.prototype[method];
+      Reflect.deleteMetadata(MESSAGE_MAPPING_METADATA, methodRef);
+      Reflect.deleteMetadata(MESSAGE_METADATA, methodRef);
     });
   };
 
@@ -211,7 +216,8 @@ describe('MetadataScanner', () => {
       addMetadata('handleError', null); // Invalid: null
 
       // Try to add metadata to the constructor (shouldn't be picked up)
-      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, 'test', TestGateway.prototype.constructor);
+      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, true, TestGateway.prototype.constructor);
+      Reflect.defineMetadata(MESSAGE_METADATA, 'test', TestGateway.prototype.constructor);
 
       const handlers = scanner.scanForMessageHandlers(gateway);
 
@@ -262,19 +268,23 @@ describe('MetadataScanner', () => {
       // Clear metadata from all methods
       [BaseGateway.prototype.handleBase, BaseGateway.prototype.handleShared].forEach((method) => {
         Reflect.deleteMetadata(MESSAGE_MAPPING_METADATA, method);
+        Reflect.deleteMetadata(MESSAGE_METADATA, method);
       });
       [ChildGateway.prototype.handleChild, ChildGateway.prototype.handleShared].forEach(
         (method) => {
           Reflect.deleteMetadata(MESSAGE_MAPPING_METADATA, method);
+          Reflect.deleteMetadata(MESSAGE_METADATA, method);
         }
       );
     });
 
     it('should discover handlers from parent classes', () => {
       // Add metadata to base class method
-      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, 'base', BaseGateway.prototype.handleBase);
+      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, true, BaseGateway.prototype.handleBase);
+      Reflect.defineMetadata(MESSAGE_METADATA, 'base', BaseGateway.prototype.handleBase);
       // Add metadata to child class method
-      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, 'child', ChildGateway.prototype.handleChild);
+      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, true, ChildGateway.prototype.handleChild);
+      Reflect.defineMetadata(MESSAGE_METADATA, 'child', ChildGateway.prototype.handleChild);
 
       const childGateway = new ChildGateway();
       const handlers = scanner.scanForMessageHandlers(childGateway);
@@ -285,7 +295,8 @@ describe('MetadataScanner', () => {
     });
 
     it('should bind inherited methods to child instance', () => {
-      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, 'base', BaseGateway.prototype.handleBase);
+      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, true, BaseGateway.prototype.handleBase);
+      Reflect.defineMetadata(MESSAGE_METADATA, 'base', BaseGateway.prototype.handleBase);
 
       const childGateway = new ChildGateway();
       const handlers = scanner.scanForMessageHandlers(childGateway);
@@ -297,11 +308,8 @@ describe('MetadataScanner', () => {
 
     it('should handle method overrides correctly', () => {
       // Add metadata to the overridden method in child class
-      Reflect.defineMetadata(
-        MESSAGE_MAPPING_METADATA,
-        'shared',
-        ChildGateway.prototype.handleShared
-      );
+      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, true, ChildGateway.prototype.handleShared);
+      Reflect.defineMetadata(MESSAGE_METADATA, 'shared', ChildGateway.prototype.handleShared);
 
       const childGateway = new ChildGateway();
       const handlers = scanner.scanForMessageHandlers(childGateway);
@@ -313,8 +321,10 @@ describe('MetadataScanner', () => {
     });
 
     it('should not duplicate methods from inheritance chain', () => {
-      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, 'base', BaseGateway.prototype.handleBase);
-      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, 'child', ChildGateway.prototype.handleChild);
+      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, true, BaseGateway.prototype.handleBase);
+      Reflect.defineMetadata(MESSAGE_METADATA, 'base', BaseGateway.prototype.handleBase);
+      Reflect.defineMetadata(MESSAGE_MAPPING_METADATA, true, ChildGateway.prototype.handleChild);
+      Reflect.defineMetadata(MESSAGE_METADATA, 'child', ChildGateway.prototype.handleChild);
 
       const childGateway = new ChildGateway();
       const handlers = scanner.scanForMessageHandlers(childGateway);

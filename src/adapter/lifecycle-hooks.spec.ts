@@ -173,7 +173,7 @@ describe('LifecycleHooksManager', () => {
       expect(manager.hasDisconnectHook(gateway)).toBe(true);
     });
 
-    it('should call all hooks in correct order', async () => {
+    it('should execute all lifecycle hooks when called sequentially', async () => {
       const executionOrder: string[] = [];
       const gateway = {
         afterInit: () => executionOrder.push('init'),

@@ -78,21 +78,20 @@ export class LifecycleHooksManager {
    * Generic hook execution with error handling
    */
   private async executeHook(
-    gateway: { constructor: { name: string } },
+    gateway: unknown,
     hookName: string,
     hookFn: () => unknown | Promise<unknown>,
     rethrow: boolean
   ): Promise<void> {
+    const gatewayName =
+      (gateway as { constructor?: { name?: string } })?.constructor?.name ?? 'UnknownGateway';
+
     try {
-      this.logger.debug(`Calling ${hookName} hook for ${gateway.constructor.name}`);
+      this.logger.debug(`Calling ${hookName} hook for ${gatewayName}`);
       await hookFn();
-      if (hookName === 'afterInit') {
-        this.logger.debug(`${hookName} hook completed for ${gateway.constructor.name}`);
-      }
+      this.logger.debug(`${hookName} hook completed for ${gatewayName}`);
     } catch (error) {
-      this.logger.error(
-        `Error in ${hookName} hook for ${gateway.constructor.name}: ${this.formatError(error)}`
-      );
+      this.logger.error(`Error in ${hookName} hook for ${gatewayName}: ${this.formatError(error)}`);
       if (rethrow) throw error;
     }
   }

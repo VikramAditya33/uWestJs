@@ -80,18 +80,21 @@ export class GuardExecutor {
 
   /**
    * Instantiates a guard using the DI container
-   * Falls back to direct instantiation if DI resolution fails
    * @param guardType - The guard type
    * @returns Guard instance
+   * @throws Error if guard cannot be resolved from DI container
    */
   private instantiateGuard(guardType: Type<CanActivate>): CanActivate {
     try {
       return this.moduleRef.get(guardType);
-    } catch {
-      this.logger.warn(
-        `Failed to resolve guard ${guardType.name} from DI container, falling back to direct instantiation`
+    } catch (error) {
+      this.logger.error(
+        `Failed to resolve guard ${guardType.name} from DI container: ${this.formatError(error)}`
       );
-      return new guardType();
+      throw new Error(
+        `Cannot instantiate guard ${guardType.name}. Ensure it is registered as a provider in your module.`,
+        { cause: error }
+      );
     }
   }
 

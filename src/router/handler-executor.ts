@@ -160,8 +160,9 @@ export class HandlerExecutor {
    * @returns Array of parameter metadata sorted by index
    */
   private getParameterMetadata(instance: object, methodName: string): ParamMetadata[] {
+    // Read metadata from prototype (where decorators store it)
     const metadata: ParamMetadata[] =
-      Reflect.getMetadata(PARAM_ARGS_METADATA, instance.constructor, methodName) || [];
+      Reflect.getMetadata(PARAM_ARGS_METADATA, Object.getPrototypeOf(instance), methodName) || [];
 
     // Create a copy before sorting to avoid mutating the original metadata
     return [...metadata].sort((a, b) => a.index - b.index);

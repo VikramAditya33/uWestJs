@@ -89,18 +89,21 @@ export class ExceptionFilterExecutor {
 
   /**
    * Instantiates an exception filter using the DI container
-   * Falls back to direct instantiation if DI resolution fails
    * @param filterType - The filter type
    * @returns Filter instance
+   * @throws Error if filter cannot be resolved from DI container
    */
   private instantiateFilter(filterType: Type<ExceptionFilter>): ExceptionFilter {
     try {
       return this.moduleRef.get(filterType);
-    } catch {
-      this.logger.warn(
-        `Failed to resolve filter ${filterType.name} from DI container, falling back to direct instantiation`
+    } catch (error) {
+      this.logger.error(
+        `Failed to resolve filter ${filterType.name} from DI container: ${this.formatError(error)}`
       );
-      return new filterType();
+      throw new Error(
+        `Cannot instantiate filter ${filterType.name}. Ensure it is registered as a provider in your module.`,
+        { cause: error }
+      );
     }
   }
 

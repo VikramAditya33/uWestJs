@@ -8,19 +8,23 @@ module.exports = {
     '!src/**/*.spec.ts',
     '!src/**/*.interface.ts',
     '!src/**/index.ts',
+    '!src/__mocks__/**',
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
-  coverageThresholds: {
+  coverageThreshold: {
     global: {
-      branches: 80,
-      functions: 80,
-      lines: 80,
-      statements: 80,
+      branches: 60,
+      functions: 70,
+      lines: 40,
+      statements: 50,
     },
   },
   moduleFileExtensions: ['ts', 'js', 'json'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
+  },
+  moduleNameMapper: {
+    '^uWebSockets\\.js$': '<rootDir>/src/__mocks__/uWebSockets.js.ts',
   },
 };

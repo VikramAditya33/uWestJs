@@ -311,13 +311,30 @@ describe('Room Operations Integration', () => {
     });
 
     it('should exclude specific client from broadcast', () => {
-      (adapter as any).broadcastToRooms('test-event', { message: 'hello' }, ['room1'], 'client-1');
+      (adapter as any).broadcastToRooms('test-event', { message: 'hello' }, ['room1'], ['client-1']);
       expect(mockClients.get('client-1')!.send).not.toHaveBeenCalled();
       expect(mockClients.get('client-2')!.send).toHaveBeenCalled();
 
       jest.clearAllMocks();
-      (adapter as any).broadcastToRooms('test-event', { message: 'hello' }, undefined, 'client-2');
+      (adapter as any).broadcastToRooms('test-event', { message: 'hello' }, undefined, ['client-2']);
       expect(mockClients.get('client-1')!.send).toHaveBeenCalled();
+      expect(mockClients.get('client-2')!.send).not.toHaveBeenCalled();
+      expect(mockClients.get('client-3')!.send).toHaveBeenCalled();
+    });
+
+    it('should exclude multiple clients from broadcast', () => {
+      // Broadcasting to room1 which has client-1 and client-2
+      // Excluding both means nobody in room1 receives the message
+      (adapter as any).broadcastToRooms('test-event', { message: 'hello' }, ['room1'], ['client-1', 'client-2']);
+      expect(mockClients.get('client-1')!.send).not.toHaveBeenCalled();
+      expect(mockClients.get('client-2')!.send).not.toHaveBeenCalled();
+      expect(mockClients.get('client-3')!.send).not.toHaveBeenCalled(); // Not in room1
+
+      jest.clearAllMocks();
+      // Broadcasting to all rooms, excluding client-1 and client-2
+      // Only client-3 should receive
+      (adapter as any).broadcastToRooms('test-event', { message: 'hello' }, undefined, ['client-1', 'client-2']);
+      expect(mockClients.get('client-1')!.send).not.toHaveBeenCalled();
       expect(mockClients.get('client-2')!.send).not.toHaveBeenCalled();
       expect(mockClients.get('client-3')!.send).toHaveBeenCalled();
     });

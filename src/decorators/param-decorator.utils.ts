@@ -1,11 +1,13 @@
+import { ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import 'reflect-metadata';
 
 /**
- * Metadata key for parameter decorators
- * This matches NestJS's internal metadata key for route arguments
+ * Re-export NestJS's ROUTE_ARGS_METADATA as PARAM_ARGS_METADATA for consistency
+ * with our internal naming conventions.
+ * 
  * @internal
  */
-export const PARAM_ARGS_METADATA = '__routeArguments__';
+export const PARAM_ARGS_METADATA = ROUTE_ARGS_METADATA;
 
 /**
  * Parameter type enum

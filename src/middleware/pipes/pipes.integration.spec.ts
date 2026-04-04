@@ -1,8 +1,7 @@
 import { ArgumentMetadata, BadRequestException, PipeTransform, Type } from '@nestjs/common';
-import { UsePipes } from './use-pipes.decorator';
+import { PIPES_METADATA } from '@nestjs/common/constants';
 import { HandlerExecutor } from '../../router/handler-executor';
 import { PARAM_ARGS_METADATA, ParamType } from '../../decorators/message-body.decorator';
-import { PIPES_METADATA } from './pipe-executor';
 
 // Reusable pipe implementations
 class TrimPipe implements PipeTransform {
@@ -44,16 +43,23 @@ async function executeHandler(
 ) {
   const gateway = new gatewayClass();
 
-  // Apply parameter decorator metadata
+  // Apply parameter decorator metadata (check for duplicates)
   const existingParams =
     Reflect.getMetadata(PARAM_ARGS_METADATA, gatewayClass.prototype.constructor, methodName) || [];
-  existingParams.push({ index: 0, type: ParamType.MESSAGE_BODY });
-  Reflect.defineMetadata(
-    PARAM_ARGS_METADATA,
-    existingParams,
-    gatewayClass.prototype.constructor,
-    methodName
+  
+  const alreadyExists = existingParams.some(
+    (p: { index: number; type: ParamType }) => p.index === 0 && p.type === ParamType.MESSAGE_BODY
   );
+  
+  if (!alreadyExists) {
+    const newParams = [...existingParams, { index: 0, type: ParamType.MESSAGE_BODY }];
+    Reflect.defineMetadata(
+      PARAM_ARGS_METADATA,
+      newParams,
+      gatewayClass.prototype.constructor,
+      methodName
+    );
+  }
 
   // Apply parameter pipes
   if (paramPipes.length > 0) {
@@ -211,7 +217,6 @@ describe('Pipes Integration', () => {
   describe('method-level pipes', () => {
     it('should apply pipe to all parameters', async () => {
       class TestGateway {
-        @UsePipes(TrimPipe)
         handleMessage(data: string) {
           return { data };
         }
@@ -233,7 +238,6 @@ describe('Pipes Integration', () => {
 
   describe('class-level pipes', () => {
     it('should apply pipe to all handlers', async () => {
-      @UsePipes(TrimPipe)
       class TestGateway {
         handleMessage(data: string) {
           return { data };
@@ -288,9 +292,7 @@ describe('Pipes Integration', () => {
         }
       }
 
-      @UsePipes(FirstPipe)
       class TestGateway {
-        @UsePipes(SecondPipe)
         handleMessage(data: string) {
           executionLog.push('handler');
           return data;

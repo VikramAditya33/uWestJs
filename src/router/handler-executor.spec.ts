@@ -4,13 +4,14 @@ import {
   CanActivate,
   ExecutionContext,
   BadRequestException,
+  ForbiddenException,
   PipeTransform,
   Type,
   ExceptionFilter,
   ArgumentsHost,
 } from '@nestjs/common';
+import { PIPES_METADATA } from '@nestjs/common/constants';
 import { UseGuards } from '../middleware/guards';
-import { PIPES_METADATA } from '../middleware/pipes/pipe-executor';
 import { UseFilters } from '../middleware/filters';
 import { WsException } from '../exceptions/ws-exception';
 import 'reflect-metadata';
@@ -27,6 +28,16 @@ function applyParamDecorator(
 ): void {
   const existingParams =
     Reflect.getMetadata(PARAM_ARGS_METADATA, target.constructor, methodName) || [];
+  
+  // Check if metadata already exists for this parameter to avoid test pollution
+  const alreadyExists = existingParams.some(
+    (p: { index: number; type: ParamType }) => p.index === paramIndex && p.type === type
+  );
+  
+  if (alreadyExists) {
+    return;
+  }
+  
   existingParams.push({ index: paramIndex, type, data });
   Reflect.defineMetadata(PARAM_ARGS_METADATA, existingParams, target.constructor, methodName);
 }
@@ -44,7 +55,14 @@ function applyPipeToParam(
     Reflect.getMetadata(`${PIPES_METADATA}:params`, target.constructor, methodName) || new Map();
 
   const paramPipes = existingPipes.get(paramIndex) || [];
-  paramPipes.push(...pipes);
+  
+  // Only add pipes that don't already exist to avoid test pollution
+  pipes.forEach((pipe) => {
+    if (!paramPipes.includes(pipe)) {
+      paramPipes.push(pipe);
+    }
+  });
+  
   existingPipes.set(paramIndex, paramPipes);
 
   Reflect.defineMetadata(`${PIPES_METADATA}:params`, existingPipes, target.constructor, methodName);
@@ -315,8 +333,8 @@ describe('HandlerExecutor', () => {
       const result = await executor.execute(gateway, 'handleMessage', mockClient, mockData);
 
       expect(result.success).toBe(false);
-      expect(result.error).toBeInstanceOf(Error);
-      expect(result.error?.message).toBe('Forbidden');
+      expect(result.error).toBeInstanceOf(ForbiddenException);
+      expect(result.error?.message).toBe('Forbidden resource');
     });
 
     it('should pass execution context to guards', async () => {
@@ -711,7 +729,7 @@ describe('HandlerExecutor', () => {
       expect(executionOrder).toEqual(['guard', 'pipe', 'handler', 'filter']);
     });
 
-    it('should not execute handler when guard fails', async () => {
+    it('should not execute filter when guard fails', async () => {
       let filterCalled = false;
 
       class FailingGuard implements CanActivate {

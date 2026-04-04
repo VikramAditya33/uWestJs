@@ -1,6 +1,6 @@
 import { ExceptionFilter, Type } from '@nestjs/common';
+import { EXCEPTION_FILTERS_METADATA } from '@nestjs/common/constants';
 import 'reflect-metadata';
-import { EXCEPTION_FILTERS_METADATA } from './exception-filter-executor';
 
 /**
  * Decorator to apply exception filters to a class or method
@@ -24,11 +24,16 @@ export function UseFilters(...filters: Type<ExceptionFilter>[]): ClassDecorator 
     descriptor?: PropertyDescriptor
   ): void | PropertyDescriptor => {
     if (propertyKey) {
-      // Method decorator
+      // Method decorator - merge with existing filters
+      // For static methods, target is the constructor itself; for instance methods, it's the prototype
+      const metadataTarget = typeof target === 'function' ? target : (target as object).constructor;
+      const existingFilters: Type<ExceptionFilter>[] =
+        Reflect.getMetadata(EXCEPTION_FILTERS_METADATA, metadataTarget, propertyKey) || [];
+      
       Reflect.defineMetadata(
         EXCEPTION_FILTERS_METADATA,
-        filters,
-        (target as object).constructor,
+        [...existingFilters, ...filters],
+        metadataTarget,
         propertyKey
       );
       return descriptor;

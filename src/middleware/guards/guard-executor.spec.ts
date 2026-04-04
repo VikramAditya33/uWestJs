@@ -5,10 +5,15 @@ import { UseGuards } from './use-guards.decorator';
 /**
  * Helper to create a basic execution context
  */
-function createContext(instance: object, client = {}, data = {}): WsExecutionContext {
+function createContext(
+  instance: object,
+  client = {},
+  data = {},
+  methodName = 'handleMessage'
+): WsExecutionContext {
   return {
     instance,
-    methodName: 'handleMessage',
+    methodName,
     client,
     data,
   };
@@ -54,12 +59,14 @@ describe('GuardExecutor', () => {
 
       const gateway = new TestGateway();
 
-      const passingResult = await executor.executeGuards(createContext(gateway));
+      const passingResult = await executor.executeGuards(
+        createContext(gateway, {}, {}, 'handlePassing')
+      );
       expect(passingResult).toBe(true);
 
-      const failingContext = createContext(gateway);
-      failingContext.methodName = 'handleFailing';
-      const failingResult = await executor.executeGuards(failingContext);
+      const failingResult = await executor.executeGuards(
+        createContext(gateway, {}, {}, 'handleFailing')
+      );
       expect(failingResult).toBe(false);
     });
 
@@ -223,6 +230,39 @@ describe('GuardExecutor', () => {
       expect(wsContext!.getClient()).toBe(client);
       expect(wsContext!.getData()).toBe(data);
       expect(wsContext!.getPattern()).toBe('handleMessage');
+    });
+
+    it('should provide correct getArgByIndex for valid and invalid indices', async () => {
+      let receivedContext: ExecutionContext | null = null;
+
+      class ArgIndexCheckGuard implements CanActivate {
+        canActivate(context: ExecutionContext): boolean {
+          receivedContext = context;
+          return true;
+        }
+      }
+
+      class TestGateway {
+        @UseGuards(ArgIndexCheckGuard)
+        handleMessage() {}
+      }
+
+      const client = { id: 'test-client' };
+      const data = { message: 'hello' };
+      const context = createContext(new TestGateway(), client, data);
+
+      await executor.executeGuards(context);
+
+      expect(receivedContext).not.toBeNull();
+      
+      // Valid indices
+      expect(receivedContext!.getArgByIndex(0)).toBe(client);
+      expect(receivedContext!.getArgByIndex(1)).toBe(data);
+      
+      // Out-of-bounds indices should return undefined
+      expect(receivedContext!.getArgByIndex(2)).toBeUndefined();
+      expect(receivedContext!.getArgByIndex(-1)).toBeUndefined();
+      expect(receivedContext!.getArgByIndex(999)).toBeUndefined();
     });
   });
 });

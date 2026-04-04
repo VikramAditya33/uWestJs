@@ -6,10 +6,15 @@ import { WsException } from '../../exceptions/ws-exception';
 /**
  * Helper to create a basic host object
  */
-function createHost(instance: object, client = {}, data = {}): WsArgumentsHost {
+function createHost(
+  instance: object,
+  client = {},
+  data = {},
+  methodName = 'handleMessage'
+): WsArgumentsHost {
   return {
     instance,
-    methodName: 'handleMessage',
+    methodName,
     client,
     data,
   };
@@ -29,7 +34,41 @@ describe('ExceptionFilterExecutor', () => {
 
       const result = await executor.catch(new WsException('Test error'), host);
 
-      expect(result).toBe('Test error');
+      expect(result).toEqual({
+        message: 'Test error',
+      });
+    });
+
+    it('should handle WsException with object message', async () => {
+      class TestGateway {}
+      const host = createHost(new TestGateway());
+
+      const errorObj = { code: 'ERR_001', details: 'Something went wrong' };
+      const result = await executor.catch(new WsException(errorObj), host);
+
+      expect(result).toEqual({
+        message: errorObj,
+      });
+    });
+
+    it('should handle WsException with circular reference in message', async () => {
+      class TestGateway {}
+      const host = createHost(new TestGateway());
+
+      // Create object with circular reference
+      const circularObj: Record<string, unknown> = { name: 'test' };
+      circularObj.self = circularObj;
+
+      const exception = new WsException(circularObj);
+      const result = await executor.catch(exception, host);
+
+      // Should return the original object (circular ref preserved)
+      expect(result).toEqual({
+        message: circularObj,
+      });
+      expect((result as { message: Record<string, unknown> }).message.self).toBe(
+        (result as { message: Record<string, unknown> }).message
+      );
     });
 
     it('should handle WsException with error code', async () => {
@@ -52,7 +91,7 @@ describe('ExceptionFilterExecutor', () => {
 
       expect(result).toEqual({
         error: 'Internal server error',
-        message: 'Generic error',
+        message: 'An unexpected error occurred',
       });
     });
   });
@@ -102,6 +141,44 @@ describe('ExceptionFilterExecutor', () => {
       expect(receivedHost!.getType()).toBe('ws');
       expect(receivedHost!.switchToWs().getClient()).toBe(client);
       expect(receivedHost!.switchToWs().getData()).toBe(data);
+    });
+
+    it('should provide correct getArgs and getArgByIndex', async () => {
+      let receivedHost: ArgumentsHost | null = null;
+
+      class ArgsCheckFilter implements ExceptionFilter {
+        catch(_exception: Error, host: ArgumentsHost): void {
+          receivedHost = host;
+        }
+      }
+
+      class TestGateway {
+        @UseFilters(ArgsCheckFilter)
+        handleMessage() {}
+      }
+
+      const client = { id: 'test-client' };
+      const data = { message: 'hello' };
+      const host = createHost(new TestGateway(), client, data);
+
+      await executor.catch(new Error('Test'), host);
+
+      expect(receivedHost).not.toBeNull();
+      
+      // getArgs should return array with 2 elements
+      const args = receivedHost!.getArgs();
+      expect(args).toHaveLength(2);
+      expect(args[0]).toBe(client);
+      expect(args[1]).toBe(data);
+
+      // getArgByIndex should return correct values
+      expect(receivedHost!.getArgByIndex(0)).toBe(client);
+      expect(receivedHost!.getArgByIndex(1)).toBe(data);
+      
+      // Out-of-range indices should return undefined
+      expect(receivedHost!.getArgByIndex(2)).toBeUndefined();
+      expect(receivedHost!.getArgByIndex(-1)).toBeUndefined();
+      expect(receivedHost!.getArgByIndex(999)).toBeUndefined();
     });
 
     it('should execute multiple filters in order', async () => {
@@ -182,6 +259,63 @@ describe('ExceptionFilterExecutor', () => {
       await executor.catch(new Error('Test'), host);
 
       expect(executionOrder).toEqual(['throwing', 'working']);
+    });
+
+    it('should await async filters', async () => {
+      const executionOrder: string[] = [];
+
+      class AsyncFilter implements ExceptionFilter {
+        async catch(): Promise<void> {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          executionOrder.push('async');
+        }
+      }
+
+      class SyncFilter implements ExceptionFilter {
+        catch(): void {
+          executionOrder.push('sync');
+        }
+      }
+
+      class TestGateway {
+        @UseFilters(AsyncFilter, SyncFilter)
+        handleMessage() {}
+      }
+
+      const host = createHost(new TestGateway());
+      await executor.catch(new Error('Test'), host);
+
+      // Async filter should complete before sync filter executes
+      expect(executionOrder).toEqual(['async', 'sync']);
+    });
+
+    it('should catch errors from async filters', async () => {
+      const executionOrder: string[] = [];
+
+      class AsyncThrowingFilter implements ExceptionFilter {
+        async catch(): Promise<void> {
+          executionOrder.push('async-throwing');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          throw new Error('Async filter error');
+        }
+      }
+
+      class WorkingFilter implements ExceptionFilter {
+        catch(): void {
+          executionOrder.push('working');
+        }
+      }
+
+      class TestGateway {
+        @UseFilters(AsyncThrowingFilter, WorkingFilter)
+        handleMessage() {}
+      }
+
+      const host = createHost(new TestGateway());
+      await executor.catch(new Error('Test'), host);
+
+      // Both filters should execute despite async error
+      expect(executionOrder).toEqual(['async-throwing', 'working']);
     });
   });
 });

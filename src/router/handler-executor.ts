@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { ForbiddenException, Logger } from '@nestjs/common';
 import 'reflect-metadata';
 import {
   PARAM_ARGS_METADATA,
@@ -8,6 +8,7 @@ import {
 import { GuardExecutor, WsExecutionContext } from '../middleware/guards';
 import { PipeExecutor } from '../middleware/pipes';
 import { ExceptionFilterExecutor, WsArgumentsHost } from '../middleware/filters';
+import { ModuleRef } from '../middleware/module-ref';
 
 /**
  * Result of executing a handler
@@ -31,12 +32,34 @@ export interface ExecutionResult {
 
 /**
  * Executes message handlers with proper parameter injection
+ * 
+ * Supports dependency injection for guards, pipes, and filters when a ModuleRef is provided.
+ * Without a ModuleRef, guards/pipes/filters are instantiated directly and cannot have
+ * constructor dependencies.
  */
 export class HandlerExecutor {
   private readonly logger = new Logger(HandlerExecutor.name);
-  private readonly guardExecutor = new GuardExecutor();
-  private readonly pipeExecutor = new PipeExecutor();
-  private readonly filterExecutor = new ExceptionFilterExecutor();
+  private readonly guardExecutor: GuardExecutor;
+  private readonly pipeExecutor: PipeExecutor;
+  private readonly filterExecutor: ExceptionFilterExecutor;
+
+  /**
+   * Creates a handler executor
+   * @param moduleRef - Optional module reference for DI support in guards, pipes, and filters
+   * @param guardExecutor - Optional guard executor for testing (defaults to new instance)
+   * @param pipeExecutor - Optional pipe executor for testing (defaults to new instance)
+   * @param filterExecutor - Optional filter executor for testing (defaults to new instance)
+   */
+  constructor(
+    moduleRef?: ModuleRef,
+    guardExecutor?: GuardExecutor,
+    pipeExecutor?: PipeExecutor,
+    filterExecutor?: ExceptionFilterExecutor
+  ) {
+    this.guardExecutor = guardExecutor || new GuardExecutor(moduleRef);
+    this.pipeExecutor = pipeExecutor || new PipeExecutor(moduleRef);
+    this.filterExecutor = filterExecutor || new ExceptionFilterExecutor(moduleRef);
+  }
 
   /**
    * Executes a handler method with parameter injection
@@ -73,7 +96,7 @@ export class HandlerExecutor {
         this.logger.debug(`Guards denied access for ${methodName}`);
         return {
           success: false,
-          error: new Error('Forbidden'),
+          error: new ForbiddenException('Forbidden resource'),
         };
       }
 
@@ -91,6 +114,9 @@ export class HandlerExecutor {
     } catch (error) {
       this.logger.error(`Error executing handler ${methodName}: ${this.formatError(error)}`);
 
+      // Convert error once to avoid duplicate conversion
+      const err = this.toError(error);
+
       // Execute exception filters
       const host: WsArgumentsHost = {
         instance,
@@ -99,11 +125,11 @@ export class HandlerExecutor {
         data,
       };
 
-      const errorResponse = await this.filterExecutor.catch(this.toError(error), host);
+      const errorResponse = await this.filterExecutor.catch(err, host);
 
       return {
         success: false,
-        error: this.toError(error),
+        error: err,
         response: errorResponse,
       };
     }

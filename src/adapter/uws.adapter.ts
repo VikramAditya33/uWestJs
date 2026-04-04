@@ -24,13 +24,28 @@ interface ExtendedWebSocket extends uWS.WebSocket<WebSocketClient> {
 /**
  * High-performance WebSocket adapter using uWebSockets.js
  *
+ * Supports dependency injection for guards, pipes, and filters when a ModuleRef is provided.
+ * Pass a ModuleRef to enable guards/pipes/filters with constructor dependencies.
+ *
  * @example
  * ```typescript
+ * // Without DI (guards/pipes/filters must have no constructor dependencies)
  * const app = await NestFactory.create(AppModule);
  * app.useWebSocketAdapter(new UwsAdapter(app, {
  *   port: 8099,
  *   maxPayloadLength: 16 * 1024,
  *   idleTimeout: 60,
+ * }));
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // With DI support (guards/pipes/filters can have constructor dependencies)
+ * const app = await NestFactory.create(AppModule);
+ * const moduleRef = app.get(ModuleRef); // Get NestJS ModuleRef
+ * app.useWebSocketAdapter(new UwsAdapter(app, {
+ *   port: 8099,
+ *   moduleRef, // Enable DI for guards/pipes/filters
  * }));
  * ```
  */
@@ -50,7 +65,7 @@ export class UwsAdapter implements WebSocketAdapter {
   // Router components
   private readonly metadataScanner = new MetadataScanner();
   private readonly messageRouter = new MessageRouter();
-  private readonly handlerExecutor = new HandlerExecutor();
+  private readonly handlerExecutor: HandlerExecutor;
   private readonly roomManager = new RoomManager();
   private gatewayInstance?: object;
 
@@ -65,6 +80,9 @@ export class UwsAdapter implements WebSocketAdapter {
       path: options?.path ?? '/*',
       cors: options?.cors,
     };
+
+    // Initialize handler executor with optional ModuleRef for DI support
+    this.handlerExecutor = new HandlerExecutor(options?.moduleRef);
 
     this.logger.log('UwsAdapter initialized');
   }

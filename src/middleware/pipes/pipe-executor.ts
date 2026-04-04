@@ -1,34 +1,8 @@
 import { ArgumentMetadata, Logger, PipeTransform, Type } from '@nestjs/common';
+import { PIPES_METADATA } from '@nestjs/common/constants';
 import 'reflect-metadata';
-
-/**
- * Metadata key for pipes
- */
-export const PIPES_METADATA = '__pipes__';
-
-/**
- * Simple module reference for dependency injection
- */
-export interface ModuleRef {
-  /**
-   * Gets an instance of a provider from the DI container
-   */
-  get<T>(typeOrToken: Type<T>): T;
-}
-
-/**
- * Default implementation that creates new instances
- */
-class DefaultModuleRef implements ModuleRef {
-  private instances = new Map<Type<unknown>, unknown>();
-
-  get<T>(type: Type<T>): T {
-    if (!this.instances.has(type)) {
-      this.instances.set(type, new type());
-    }
-    return this.instances.get(type) as T;
-  }
-}
+import { PARAM_ARGS_METADATA } from '../../decorators/param-decorator.utils';
+import { DefaultModuleRef, ModuleRef } from '../module-ref';
 
 /**
  * Parameter metadata with pipe information
@@ -94,7 +68,7 @@ export class PipeExecutor {
         continue;
       }
 
-      const value = args[paramPipe.index];
+      const value = transformedArgs[paramPipe.index];
       const metadata: ArgumentMetadata = {
         type: 'custom',
         metatype: undefined,
@@ -152,34 +126,31 @@ export class PipeExecutor {
       Reflect.getMetadata(`${PIPES_METADATA}:params`, instance.constructor, methodName) ||
       new Map();
 
-    const PARAM_ARGS_METADATA = '__routeArguments__';
     const paramMetadata: Array<{ index: number; type: string; data?: string }> =
       Reflect.getMetadata(PARAM_ARGS_METADATA, instance.constructor, methodName) || [];
 
     const allPipes = [...classPipes, ...methodPipes];
     const result: ParamWithPipes[] = [];
 
-    // Apply class/method level pipes to all decorated parameters
-    if (allPipes.length > 0 && paramMetadata.length > 0) {
-      paramMetadata.forEach((param) => {
-        const paramSpecificPipes = paramPipes.get(param.index) || [];
-        result.push({
-          index: param.index,
-          type: 'custom',
-          data: param.data,
-          pipes: [...allPipes, ...paramSpecificPipes],
-        });
-      });
-      return result;
-    }
+    // Build a combined map of all parameter indices that need pipe processing
+    const paramIndices = new Set<number>([
+      ...paramMetadata.map((p) => p.index),
+      ...paramPipes.keys(),
+    ]);
 
-    // Add parameter-specific pipes only
-    paramPipes.forEach((pipes, index) => {
-      result.push({
-        index,
-        type: 'custom',
-        pipes: [...allPipes, ...pipes],
-      });
+    paramIndices.forEach((index) => {
+      const paramMeta = paramMetadata.find((p) => p.index === index);
+      const paramSpecificPipes = paramPipes.get(index) || [];
+      const combinedPipes = [...allPipes, ...paramSpecificPipes];
+
+      if (combinedPipes.length > 0) {
+        result.push({
+          index,
+          type: paramMeta?.type || 'custom',
+          data: paramMeta?.data,
+          pipes: combinedPipes,
+        });
+      }
     });
 
     return result;

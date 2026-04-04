@@ -14,6 +14,16 @@ function applyMessageBodyDecorator(
 ): void {
   const existingParams =
     Reflect.getMetadata(PARAM_ARGS_METADATA, target.constructor, methodName) || [];
+  
+  // Check if metadata already exists for this parameter to avoid accumulation
+  const alreadyExists = existingParams.some(
+    (p: { index: number; type: ParamType }) => p.index === paramIndex && p.type === ParamType.MESSAGE_BODY
+  );
+  
+  if (alreadyExists) {
+    return;
+  }
+  
   existingParams.push({ index: paramIndex, type: ParamType.MESSAGE_BODY, data });
   Reflect.defineMetadata(PARAM_ARGS_METADATA, existingParams, target.constructor, methodName);
 }
@@ -87,7 +97,7 @@ describe('Guards Integration', () => {
         { message: 'hello' }
       );
       expect(unauthResult.success).toBe(false);
-      expect(unauthResult.error?.message).toBe('Forbidden');
+      expect(unauthResult.error?.message).toBe('Forbidden resource');
     });
 
     it('should allow or deny based on role', async () => {

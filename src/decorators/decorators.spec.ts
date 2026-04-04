@@ -79,10 +79,7 @@ describe('Parameter Decorators', () => {
         data: undefined,
       });
 
-      const propertyMetadata = getParamMetadata(
-        TestGateway.prototype,
-        'handleWithMessageBodyProperty'
-      );
+      const propertyMetadata = getParamMetadata(TestGateway.prototype, 'handleWithMessageBodyProperty');
       expect(propertyMetadata).toHaveLength(1);
       expect(propertyMetadata[0]).toEqual({
         index: 0,

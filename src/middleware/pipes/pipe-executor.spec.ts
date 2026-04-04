@@ -1,5 +1,6 @@
 import { ArgumentMetadata, BadRequestException, PipeTransform, Type } from '@nestjs/common';
-import { PipeExecutor, PIPES_METADATA } from './pipe-executor';
+import { PIPES_METADATA } from '@nestjs/common/constants';
+import { PipeExecutor } from './pipe-executor';
 import { PARAM_ARGS_METADATA, ParamType } from '../../decorators/message-body.decorator';
 
 /**
@@ -39,9 +40,10 @@ function applyPipeToParam(
 // Reusable pipe implementations
 class UpperCasePipe implements PipeTransform {
   transform(value: string): string {
-    return value.toUpperCase();
+    return typeof value === 'string' ? value.toUpperCase() : value;
+   }
   }
-}
+
 
 class TrimPipe implements PipeTransform {
   transform(value: string): string {

@@ -329,8 +329,6 @@ describe('MessageRouter', () => {
       const nanResult = await router.route({ event: { cmd: 'test', value: NaN } }, {});
       expect(nanResult.handled).toBe(true);
 
-      router.clear();
-      router.registerHandlers([createHandler(pattern, () => 'matched')]);
       const infResult = await router.route({ event: { cmd: 'test', value: Infinity } }, {});
       expect(infResult.handled).toBe(true);
     });

@@ -29,6 +29,12 @@ jobs:
       
       - name: Check formatting
         run: npm run format:check
+      
+      - name: CodeFactor
+        uses: codefactor-io/codefactor-action@v1
+        with:
+          token: ${{ secrets.CODEFACTOR_TOKEN }}
+        continue-on-error: true
 
   # Test with coverage
   test:
@@ -107,4 +113,3 @@ jobs:
           name: package-build
           path: '*.tgz'
           retention-days: 7
-

@@ -1,42 +1,30 @@
 import { ArgumentsHost, ExceptionFilter, Logger, Type } from '@nestjs/common';
+import { EXCEPTION_FILTERS_METADATA } from '@nestjs/common/constants';
 import 'reflect-metadata';
 import { WsException } from '../../exceptions/ws-exception';
-
-/**
- * Metadata key for exception filters
- */
-export const EXCEPTION_FILTERS_METADATA = '__exceptionFilters__';
+import { DefaultModuleRef, ModuleRef } from '../module-ref';
+import { WsContext } from '../ws-context';
 
 /**
  * WebSocket arguments host for exception filters
+ * Extends the base WsContext with filter-specific functionality
  */
-export interface WsArgumentsHost {
-  /**
-   * The WebSocket client
-   */
-  client: unknown;
-
-  /**
-   * The message data
-   */
-  data: unknown;
-
-  /**
-   * The gateway instance
-   */
-  instance: object;
-
-  /**
-   * The method name
-   */
-  methodName: string;
-}
+export interface WsArgumentsHost extends WsContext {}
 
 /**
  * Executes exception filters when errors occur
  */
 export class ExceptionFilterExecutor {
   private readonly logger = new Logger(ExceptionFilterExecutor.name);
+  private readonly moduleRef: ModuleRef;
+
+  /**
+   * Creates an exception filter executor
+   * @param moduleRef - Optional module reference for DI
+   */
+  constructor(moduleRef?: ModuleRef) {
+    this.moduleRef = moduleRef || new DefaultModuleRef();
+  }
 
   /**
    * Catches and handles exceptions using filters
@@ -56,7 +44,7 @@ export class ExceptionFilterExecutor {
 
         try {
           const argumentsHost = this.createArgumentsHost(host);
-          filter.catch(exception, argumentsHost);
+          await filter.catch(exception, argumentsHost);
         } catch (error) {
           // Filter threw an error, log and continue to next filter
           this.logger.error(
@@ -88,14 +76,12 @@ export class ExceptionFilterExecutor {
   }
 
   /**
-   * Instantiates an exception filter
+   * Instantiates an exception filter using the DI container
    * @param filterType - The filter type
    * @returns Filter instance
    */
   private instantiateFilter(filterType: Type<ExceptionFilter>): ExceptionFilter {
-    // For now, create a simple instance
-    // In a full NestJS integration, this would use the DI container
-    return new filterType();
+    return this.moduleRef.get(filterType);
   }
 
   /**
@@ -104,9 +90,11 @@ export class ExceptionFilterExecutor {
    * @returns ArgumentsHost
    */
   private createArgumentsHost(host: WsArgumentsHost): ArgumentsHost {
+    const args = [host.client, host.data];
+    
     return {
-      getArgs: () => [host.client, host.data],
-      getArgByIndex: (index: number) => (index === 0 ? host.client : host.data),
+      getArgs: <T extends unknown[] = unknown[]>() => args as T,
+      getArgByIndex: <T = unknown>(index: number): T => args[index] as T,
       switchToRpc: () => ({
         getContext: () => host.client,
         getData: () => host.data,
@@ -133,10 +121,12 @@ export class ExceptionFilterExecutor {
       return exception.getError();
     }
 
-    // For generic errors, return internal server error
+    // For generic errors, log details server-side but return generic message to client
+    this.logger.error(`Unhandled exception: ${exception.message}`, exception.stack);
+    
     return {
       error: 'Internal server error',
-      message: exception.message,
+      message: 'An unexpected error occurred',
     };
   }
 

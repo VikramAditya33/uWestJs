@@ -1,6 +1,6 @@
 import { PipeTransform, Type } from '@nestjs/common';
+import { PIPES_METADATA } from '@nestjs/common/constants';
 import 'reflect-metadata';
-import { PIPES_METADATA } from './pipe-executor';
 
 /**
  * Decorator to apply pipes to a class, method, or parameter
@@ -19,7 +19,7 @@ import { PIPES_METADATA } from './pipe-executor';
  *
  * // Parameter-level pipes
  * @SubscribeMessage('update')
- * handleUpdate(@MessageBody(ValidationPipe) data: UpdateDto) {
+ * handleUpdate(@UsePipes(ValidationPipe) @MessageBody() data: UpdateDto) {
  *   return data;
  * }
  * ```
@@ -36,12 +36,15 @@ export function UsePipes(
     propertyKey?: string | symbol,
     descriptorOrIndex?: PropertyDescriptor | number
   ): void | PropertyDescriptor => {
+    // For static methods, target is the constructor itself; for instance methods, it's the prototype
+    const metadataTarget = typeof target === 'function' ? target : (target as object).constructor;
+
     if (typeof descriptorOrIndex === 'number') {
       // Parameter decorator
       const existingPipes: Map<number, Type<PipeTransform>[]> =
         Reflect.getMetadata(
           `${PIPES_METADATA}:params`,
-          (target as object).constructor,
+          metadataTarget,
           propertyKey!
         ) || new Map();
 
@@ -52,15 +55,18 @@ export function UsePipes(
       Reflect.defineMetadata(
         `${PIPES_METADATA}:params`,
         existingPipes,
-        (target as object).constructor,
+        metadataTarget,
         propertyKey!
       );
     } else if (propertyKey) {
-      // Method decorator
+      // Method decorator - merge with existing pipes
+      const existingPipes: Type<PipeTransform>[] =
+        Reflect.getMetadata(PIPES_METADATA, metadataTarget, propertyKey) || [];
+      
       Reflect.defineMetadata(
         PIPES_METADATA,
-        pipeTypes,
-        (target as object).constructor,
+        [...existingPipes, ...pipeTypes],
+        metadataTarget,
         propertyKey
       );
       return descriptorOrIndex;

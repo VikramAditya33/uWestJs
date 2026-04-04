@@ -1,41 +1,29 @@
 import { CanActivate, ExecutionContext, Logger, Type } from '@nestjs/common';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import 'reflect-metadata';
-
-/**
- * Metadata key for guards
- */
-export const GUARDS_METADATA = '__guards__';
+import { DefaultModuleRef, ModuleRef } from '../module-ref';
+import { WsContext } from '../ws-context';
 
 /**
  * Execution context for WebSocket guards
+ * Extends the base WsContext with guard-specific functionality
  */
-export interface WsExecutionContext {
-  /**
-   * The gateway instance
-   */
-  instance: object;
-
-  /**
-   * The method name being executed
-   */
-  methodName: string;
-
-  /**
-   * The WebSocket client
-   */
-  client: unknown;
-
-  /**
-   * The message data
-   */
-  data: unknown;
-}
+export interface WsExecutionContext extends WsContext {}
 
 /**
  * Executes guards before handler execution
  */
 export class GuardExecutor {
   private readonly logger = new Logger(GuardExecutor.name);
+  private readonly moduleRef: ModuleRef;
+
+  /**
+   * Creates a guard executor
+   * @param moduleRef - Optional module reference for DI
+   */
+  constructor(moduleRef?: ModuleRef) {
+    this.moduleRef = moduleRef || new DefaultModuleRef();
+  }
 
   /**
    * Executes all guards for a handler
@@ -90,14 +78,12 @@ export class GuardExecutor {
   }
 
   /**
-   * Instantiates a guard
+   * Instantiates a guard using the DI container
    * @param guardType - The guard type
    * @returns Guard instance
    */
   private instantiateGuard(guardType: Type<CanActivate>): CanActivate {
-    // For now, create a simple instance
-    // In a full NestJS integration, this would use the DI container
-    return new guardType();
+    return this.moduleRef.get(guardType);
   }
 
   /**
@@ -112,10 +98,16 @@ export class GuardExecutor {
       getClass: () => context.instance.constructor as Type<unknown>,
       getHandler: () => {
         const method = (context.instance as Record<string, unknown>)[context.methodName];
+        if (typeof method !== 'function') {
+          throw new Error(`Handler method '${context.methodName}' not found on instance`);
+        }
         return method as (...args: unknown[]) => unknown;
       },
       getArgs: () => [context.client, context.data],
-      getArgByIndex: (index: number) => (index === 0 ? context.client : context.data),
+      getArgByIndex: (index: number) => {
+        const args = [context.client, context.data];
+        return args[index];
+      },
       switchToRpc: () => ({
         getContext: () => context.client,
         getData: () => context.data,

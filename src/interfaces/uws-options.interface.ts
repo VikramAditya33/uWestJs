@@ -1,4 +1,5 @@
 import * as uWS from 'uWebSockets.js';
+import { ModuleRef } from '../middleware/module-ref';
 
 /**
  * CORS configuration options
@@ -81,6 +82,29 @@ export interface UwsAdapterOptions {
    * CORS configuration
    */
   cors?: CorsOptions;
+
+  /**
+   * Module reference for dependency injection
+   * 
+   * When provided, enables DI support for guards, pipes, and filters.
+   * This allows guards/pipes/filters to have constructor dependencies
+   * (e.g., ConfigService, JwtService) that will be resolved from the
+   * NestJS DI container.
+   * 
+   * Without this, guards/pipes/filters are instantiated directly and
+   * cannot have constructor dependencies.
+   * 
+   * @example
+   * ```typescript
+   * const app = await NestFactory.create(AppModule);
+   * const moduleRef = app.get(ModuleRef);
+   * app.useWebSocketAdapter(new UwsAdapter(app, {
+   *   port: 8099,
+   *   moduleRef, // Enable DI for guards/pipes/filters
+   * }));
+   * ```
+   */
+  moduleRef?: ModuleRef;
 }
 
 /**

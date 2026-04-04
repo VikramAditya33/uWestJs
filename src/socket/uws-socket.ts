@@ -1,17 +1,20 @@
 import * as uWS from 'uWebSockets.js';
-import { UwsSocket, BroadcastOperator } from '../interfaces';
-import { WebSocketClient } from '../interfaces';
-
+import { UwsSocket, BroadcastOperator, WebSocketClient } from '../interfaces';
 // Error message for unimplemented room features
 const ROOM_NOT_IMPLEMENTED = 'Room management not yet implemented. Coming in Phase 3.';
 
 /**
  * Socket wrapper that provides a Socket.IO-like API over native uWebSockets.js
  * This class wraps the native uWS.WebSocket and adds convenient methods
+ * @template TData - Type of custom data attached to the socket
+ * @template TEmitData - Type of data that can be emitted
  */
-export class UwsSocketImpl implements UwsSocket {
+export class UwsSocketImpl<TData = unknown, TEmitData = unknown> implements UwsSocket<
+  TData,
+  TEmitData
+> {
   private _id: string;
-  private _data: any = {};
+  private _data: TData = {} as TData;
   private nativeSocket: uWS.WebSocket<WebSocketClient>;
 
   constructor(id: string, nativeSocket: uWS.WebSocket<WebSocketClient>) {
@@ -30,11 +33,11 @@ export class UwsSocketImpl implements UwsSocket {
    * Get/set custom data attached to this socket
    * Use this to store user information, session data, etc.
    */
-  get data(): any {
+  get data(): TData {
     return this._data;
   }
 
-  set data(value: any) {
+  set data(value: TData) {
     this._data = value;
   }
 
@@ -48,10 +51,14 @@ export class UwsSocketImpl implements UwsSocket {
    * socket.emit('notification', { type: 'info', message: 'Welcome' });
    * ```
    */
-  emit(event: string, data: any): void {
+  emit(event: string, data: TEmitData): void {
     const message = this.serializeMessage(event, data);
     try {
-      this.nativeSocket.send(message);
+      const result = this.nativeSocket.send(message);
+      // uWebSockets.js send() returns: 0 (success), 1 (backpressure), 2 (dropped)
+      if (result === 2) {
+        throw new Error(`Message dropped due to backpressure for event "${event}"`);
+      }
     } catch (error) {
       throw new Error(`Failed to emit event "${event}": ${formatError(error)}`);
     }
@@ -131,7 +138,7 @@ export class UwsSocketImpl implements UwsSocket {
    * socket.to(['room1', 'room2']).emit('message', data);
    * ```
    */
-  to(_room: string | string[]): BroadcastOperator {
+  to(_room: string | string[]): BroadcastOperator<TEmitData> {
     throw new Error(ROOM_NOT_IMPLEMENTED);
   }
 
@@ -143,8 +150,8 @@ export class UwsSocketImpl implements UwsSocket {
    * socket.broadcast.to('room1').emit('message', data); // Send to room except this socket
    * ```
    */
-  get broadcast(): BroadcastOperator {
-    throw new Error('Broadcast not yet implemented. Coming in Phase 3.');
+  get broadcast(): BroadcastOperator<TEmitData> {
+    throw new Error(ROOM_NOT_IMPLEMENTED);
   }
 
   /**
@@ -160,7 +167,7 @@ export class UwsSocketImpl implements UwsSocket {
    * Serialize event and data to JSON string
    * @private
    */
-  private serializeMessage(event: string, data: any): string {
+  private serializeMessage(event: string, data: TEmitData): string {
     try {
       return JSON.stringify({ event, data });
     } catch (error) {

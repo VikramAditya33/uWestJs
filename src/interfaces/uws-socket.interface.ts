@@ -1,8 +1,10 @@
 /**
  * Enhanced WebSocket interface with uWestJS features
  * This wraps the native uWebSockets.js socket with a Socket.IO-like API
+ * @template TData - Type of custom data attached to the socket
+ * @template TEmitData - Type of data that can be emitted
  */
-export interface UwsSocket {
+export interface UwsSocket<TData = unknown, TEmitData = unknown> {
   /**
    * Unique socket identifier
    */
@@ -12,7 +14,7 @@ export interface UwsSocket {
    * Custom data attached to the socket
    * Use this to store user information, session data, etc.
    */
-  data: any;
+  data: TData;
 
   /**
    * Emit an event to this specific client
@@ -23,7 +25,7 @@ export interface UwsSocket {
    * socket.emit('message', { text: 'Hello!' });
    * ```
    */
-  emit(event: string, data: any): void;
+  emit(event: string, data: TEmitData): void;
 
   /**
    * Disconnect this client
@@ -80,7 +82,7 @@ export interface UwsSocket {
    * socket.to(['room1', 'room2']).emit('message', data);
    * ```
    */
-  to(room: string | string[]): BroadcastOperator;
+  to(room: string | string[]): BroadcastOperator<TEmitData>;
 
   /**
    * Broadcast operator for sending to multiple clients
@@ -90,31 +92,32 @@ export interface UwsSocket {
    * socket.broadcast.to('room1').emit('message', data); // Send to room except this socket
    * ```
    */
-  readonly broadcast: BroadcastOperator;
+  readonly broadcast: BroadcastOperator<TEmitData>;
 }
 
 /**
  * Broadcast operator for sending messages to multiple clients
+ * @template TEmitData - Type of data that can be emitted
  */
-export interface BroadcastOperator {
+export interface BroadcastOperator<TEmitData = unknown> {
   /**
    * Target specific room(s)
    * @param room - Room name or array of room names
    * @returns BroadcastOperator for chaining
    */
-  to(room: string | string[]): BroadcastOperator;
+  to(room: string | string[]): BroadcastOperator<TEmitData>;
 
   /**
    * Exclude specific client(s)
    * @param clientId - Client ID or array of client IDs to exclude
    * @returns BroadcastOperator for chaining
    */
-  except(clientId: string | string[]): BroadcastOperator;
+  except(clientId: string | string[]): BroadcastOperator<TEmitData>;
 
   /**
    * Emit event to all targeted clients
    * @param event - Event name
    * @param data - Data to send
    */
-  emit(event: string, data: any): void;
+  emit(event: string, data: TEmitData): void;
 }

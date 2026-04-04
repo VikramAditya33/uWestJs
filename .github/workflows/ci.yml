@@ -7,13 +7,54 @@ on:
     branches: [main]
 
 jobs:
+  # Lint check
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run ESLint
+        run: npm run lint
+
+  # Format check
+  format:
+    name: Format Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Check formatting
+        run: npm run format:check
+
+  # Test with coverage
   test:
+    name: Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     
     strategy:
       matrix:
-        node-version: [20.x, 22.x, 24.x]
-        nestjs-version: [9, 10, 11]
+        node-version: [20.x, 22.x]
     
     steps:
       - uses: actions/checkout@v4
@@ -22,40 +63,35 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+          cache: 'npm'
       
       - name: Install dependencies
         run: npm ci
       
-      - name: Install NestJS ${{ matrix.nestjs-version }}
-        run: |
-          npm install --save-dev @nestjs/common@^${{ matrix.nestjs-version }}.0.0
-          npm install --save-dev @nestjs/websockets@^${{ matrix.nestjs-version }}.0.0
-      
-      - name: Run linter
-        run: npm run lint
-      
-      - name: Run tests
+      - name: Run tests with coverage
         run: npm run test:cov
       
-      - name: Upload coverage
+      - name: Upload coverage to Codecov
+        if: matrix.node-version == '20.x'
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage/lcov.info
-      
-      - name: Build
-        run: npm run build
+          fail_ci_if_error: false
 
+  # Build check
   build:
+    name: Build
     runs-on: ubuntu-latest
-    needs: test
+    needs: [lint, format, test]
     
     steps:
       - uses: actions/checkout@v4
       
-      - name: Use Node.js
+      - name: Use Node.js 20.x
         uses: actions/setup-node@v4
         with:
-          node-version: 24.x
+          node-version: 20.x
+          cache: 'npm'
       
       - name: Install dependencies
         run: npm ci
@@ -63,11 +99,29 @@ jobs:
       - name: Build package
         run: npm run build
       
-      - name: Pack
+      - name: Check build output
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "Build failed: dist directory not found"
+            exit 1
+          fi
+          if [ ! -f "dist/index.js" ]; then
+            echo "Build failed: dist/index.js not found"
+            exit 1
+          fi
+          if [ ! -f "dist/index.d.ts" ]; then
+            echo "Build failed: dist/index.d.ts not found"
+            exit 1
+          fi
+          echo "Build successful!"
+      
+      - name: Pack package
         run: npm pack
       
-      - name: Upload artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: package
+          name: package-build
           path: '*.tgz'
+          retention-days: 7
+

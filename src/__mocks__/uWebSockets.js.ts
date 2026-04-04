@@ -15,6 +15,7 @@ export interface WebSocket<T = unknown> {
   send(message: string | ArrayBuffer): void;
   close(): void;
   getBufferedAmount(): number;
+  getUserData(): T;
 }
 
 /**

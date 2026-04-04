@@ -4,7 +4,7 @@
  */
 
 // Core adapter
-export * from './adapter/uws.adapter';
+export { UwsAdapter } from './adapter/uws.adapter';
 
 // Decorators
 export * from './decorators';
@@ -13,9 +13,9 @@ export * from './decorators';
 export * from './interfaces';
 
 // Socket wrapper
-export * from './socket';
+export { UwsSocketImpl } from './socket/uws-socket';
 
-// Exceptions
-export * from './exceptions/ws-exception';
+// Router (for advanced usage)
+export { MessageRouter, MetadataScanner, HandlerExecutor } from './router';
 
-// Note: Testing utilities are exported from 'uwestjs/testing'
+// Note: Testing utilities will be exported from 'uwestjs/testing' in Phase 4

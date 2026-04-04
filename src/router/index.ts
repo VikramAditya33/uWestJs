@@ -3,6 +3,7 @@
  * @module router
  */
 
-export * from './message-router';
-export * from './metadata-scanner';
-export * from './handler-executor';
+export { MessageRouter } from './message-router';
+export { MetadataScanner } from './metadata-scanner';
+export { HandlerExecutor } from './handler-executor';
+export type { MessageHandler } from './metadata-scanner';

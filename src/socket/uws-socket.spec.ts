@@ -65,6 +65,14 @@ describe('UwsSocketImpl', () => {
       );
     });
 
+    it('should handle undefined data', () => {
+      socket.emit('ping', undefined);
+
+      expect(mockNativeSocket.send).toHaveBeenCalledWith(
+        JSON.stringify({ event: 'ping', data: undefined })
+      );
+    });
+
     it('should throw error if send fails', () => {
       mockNativeSocket.send.mockImplementation(() => {
         throw new Error('Send failed');
@@ -161,8 +169,8 @@ describe('UwsSocketImpl', () => {
 
     it('should throw error for broadcast', () => {
       expect(() => {
-        const _ = socket.broadcast;
-      }).toThrow('Broadcast not yet implemented');
+        socket.broadcast;
+      }).toThrow('Room management not yet implemented');
     });
   });
 
@@ -175,27 +183,54 @@ describe('UwsSocketImpl', () => {
 
   describe('data property', () => {
     it('should allow storing user information', () => {
-      socket.data = {
+      interface UserData {
+        userId: string;
+        username: string;
+        role: string;
+      }
+
+      const typedSocket = socket as UwsSocketImpl<UserData>;
+      typedSocket.data = {
         userId: 'user-123',
         username: 'john_doe',
         role: 'admin',
       };
 
-      expect(socket.data.userId).toBe('user-123');
-      expect(socket.data.username).toBe('john_doe');
-      expect(socket.data.role).toBe('admin');
+      expect(typedSocket.data.userId).toBe('user-123');
+      expect(typedSocket.data.username).toBe('john_doe');
+      expect(typedSocket.data.role).toBe('admin');
     });
 
     it('should allow updating data', () => {
-      socket.data = { count: 0 };
-      expect(socket.data.count).toBe(0);
+      interface CountData {
+        count: number;
+      }
 
-      socket.data = { count: 1 };
-      expect(socket.data.count).toBe(1);
+      const typedSocket = socket as UwsSocketImpl<CountData>;
+      typedSocket.data = { count: 0 };
+      expect(typedSocket.data.count).toBe(0);
+
+      typedSocket.data = { count: 1 };
+      expect(typedSocket.data.count).toBe(1);
     });
 
     it('should allow storing complex objects', () => {
-      socket.data = {
+      interface ComplexData {
+        user: {
+          id: string;
+          profile: {
+            name: string;
+            age: number;
+          };
+        };
+        session: {
+          token: string;
+          expiresAt: Date;
+        };
+      }
+
+      const typedSocket = socket as UwsSocketImpl<ComplexData>;
+      typedSocket.data = {
         user: {
           id: '123',
           profile: {
@@ -209,8 +244,8 @@ describe('UwsSocketImpl', () => {
         },
       };
 
-      expect(socket.data.user.profile.name).toBe('John');
-      expect(socket.data.session.token).toBe('abc123');
+      expect(typedSocket.data.user.profile.name).toBe('John');
+      expect(typedSocket.data.session.token).toBe('abc123');
     });
   });
 });

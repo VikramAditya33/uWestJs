@@ -14,11 +14,14 @@ module.exports = {
   coverageReporters: ['text', 'lcov', 'html'],
   coverageThreshold: {
     global: {
-      branches: 60,
-      functions: 70,
-      lines: 40,
-      statements: 50,
+      branches: 70,
+      functions: 85,
+      lines: 75,
+      statements: 75,
     },
+    // TODO: Increase adapter coverage with integration tests
+    // The adapter has lower coverage due to WebSocket connection paths
+    // that require real connections to test properly
   },
   moduleFileExtensions: ['ts', 'js', 'json'],
   transform: {

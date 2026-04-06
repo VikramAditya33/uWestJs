@@ -7,7 +7,7 @@
 > High-performance WebSocket adapter for NestJS using uWebSockets.js
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)](https://nodejs.org)
+[![Node.js Version](https://img.shields.io/badge/node-20%20%7C%2022%20%7C%2024%20%7C%2025-brightgreen)](https://nodejs.org)
 [![CodeFactor](https://www.codefactor.io/repository/github/vikramaditya33/uwestjs/badge)](https://www.codefactor.io/repository/github/vikramaditya33/uwestjs)
 
 uWestJS is a drop-in replacement for the default NestJS WebSocket adapter, powered by [uWebSockets.js](https://github.com/uNetworking/uWebSockets.js). It provides significantly better performance while maintaining full compatibility with NestJS decorators and patterns you already know.
@@ -53,9 +53,14 @@ pnpm add uwestjs
 
 ## Requirements
 
-- Node.js >= 20.0.0
-- NestJS >= 9.0.0
-- TypeScript >= 5.0.0
+- Node.js 20, 22, 24, or 25
+- NestJS >= 11.0.0
+- TypeScript >= 6.0.0
+
+### Note
+- Supported Node.js versions: 20, 22, 24, 25
+- If you experience installation or runtime issues, run `npm cache clean --force` before installing
+
 
 ## Quick Start
 

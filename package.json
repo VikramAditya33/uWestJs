@@ -1,6 +1,6 @@
 {
   "name": "uwestjs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "High-performance WebSocket adapter for NestJS using uWebSockets.js",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -65,7 +65,7 @@
     "rxjs": "^7.0.0"
   },
   "dependencies": {
-    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.48.0"
+    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.60.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
@@ -74,7 +74,7 @@
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/testing": "^11.0.0",
     "@nestjs/websockets": "^11.0.0",
-    "@types/jest": "^29.0.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
@@ -83,13 +83,13 @@
     "eslint-plugin-prettier": "^5.0.0",
     "globals": "^15.0.0",
     "husky": "^9.0.0",
-    "jest": "^29.0.0",
+    "jest": "^30.0.0",
     "lint-staged": "^16.0.0",
     "prettier": "^3.0.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1",
     "ts-jest": "^29.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^6.0.0"
   },
   "engines": {
     "node": ">=20.0.0"

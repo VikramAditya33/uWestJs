@@ -89,6 +89,7 @@ interface ExtendedWebSocket extends uWS.WebSocket<WebSocketClient> {
  */
 export class UwsAdapter implements WebSocketAdapter {
   private app!: uWS.TemplatedApp;
+  private isSharedApp = false;
   private listenSocket: false | uWS.us_listen_socket = false;
   private clients = new Map<string, ExtendedWebSocket>();
   private sockets = new Map<string, UwsSocketImpl>(); // Track wrapped sockets
@@ -122,6 +123,21 @@ export class UwsAdapter implements WebSocketAdapter {
       cors: options?.cors,
     };
 
+    // Use provided uWS App if available (v2.0.0+ for HTTP + WebSocket integration)
+    if (options?.uwsApp) {
+      this.app = options.uwsApp;
+      this.isSharedApp = true;
+      this.logger.log('UwsAdapter using provided uWS App instance (shared with HTTP)');
+
+      // Warn if port is also specified (it will be ignored in shared mode)
+      if (options?.port) {
+        this.logger.warn(
+          'Both uwsApp and port options provided. Port option is ignored when using shared app - ' +
+            'the HTTP server manages the listening port.'
+        );
+      }
+    }
+
     // Initialize handler executor with optional ModuleRef for DI support
     this.handlerExecutor = new HandlerExecutor({ moduleRef: options?.moduleRef });
 
@@ -135,8 +151,22 @@ export class UwsAdapter implements WebSocketAdapter {
    *
    * Note: The adapter uses the port configured in constructor options (default: 8099).
    * This is intentional as uWebSockets.js requires explicit port configuration.
+   *
+   * In v2.0.0+, if a uWS App was provided in constructor options, this method
+   * returns the existing instance instead of creating a new one.
    */
   create(_port: number, _options?: unknown): Promise<uWS.TemplatedApp> {
+    // If uwsApp was provided in constructor, use it (v2.0.0+ HTTP + WebSocket integration)
+    if (this.app) {
+      if (this.isSharedApp) {
+        this.logger.log('Using existing uWS App instance (shared with HTTP)');
+      } else {
+        this.logger.debug('create() called again - returning existing app instance');
+      }
+      return Promise.resolve(this.app);
+    }
+
+    // Create new uWS App (v1.x standalone WebSocket mode)
     this.app = uWS.App();
     this.logger.log(`uWebSockets server created, will listen on port ${this.options.port}`);
     return Promise.resolve(this.app);
@@ -257,19 +287,23 @@ export class UwsAdapter implements WebSocketAdapter {
 
     this.logger.log('✓ WebSocket routes configured');
 
-    // Start listening
-    this.app.listen(this.options.port, (token) => {
-      if (token) {
-        this.listenSocket = token;
-        this.logger.log(`✓ uWebSockets server listening on port ${this.options.port}`);
-      } else {
-        const errorMsg = `Failed to listen on port ${this.options.port} - port may be in use or unavailable`;
-        this.logger.error(errorMsg);
-        // Throw error to crash the application rather than running in broken state
-        // This ensures the application doesn't start if WebSocket server fails
-        throw new Error(errorMsg);
-      }
-    });
+    // Start listening (only if not using shared app - HTTP server handles listening)
+    if (!this.isSharedApp) {
+      this.app.listen(this.options.port, (token) => {
+        if (token) {
+          this.listenSocket = token;
+          this.logger.log(`✓ uWebSockets server listening on port ${this.options.port}`);
+        } else {
+          const errorMsg = `Failed to listen on port ${this.options.port} - port may be in use or unavailable`;
+          this.logger.error(errorMsg);
+          // Throw error to crash the application rather than running in broken state
+          // This ensures the application doesn't start if WebSocket server fails
+          throw new Error(errorMsg);
+        }
+      });
+    } else {
+      this.logger.log('✓ Skipping listen() - using shared uWS App (HTTP server manages lifecycle)');
+    }
   }
 
   /**
@@ -402,10 +436,15 @@ export class UwsAdapter implements WebSocketAdapter {
    * Close the server and all client connections
    */
   close(_server: unknown): void {
-    if (this.listenSocket) {
+    // Only close the listen socket if we own it (not shared with HTTP server)
+    if (this.listenSocket && !this.isSharedApp) {
       uWS.us_listen_socket_close(this.listenSocket);
       this.listenSocket = false;
       this.logger.log('Server socket closed');
+    } else if (this.isSharedApp) {
+      this.logger.log(
+        'Skipping socket close - using shared uWS App (HTTP server manages lifecycle)'
+      );
     }
 
     // Close all client connections

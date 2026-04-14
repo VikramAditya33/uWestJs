@@ -53,9 +53,13 @@ export interface HttpOptions {
 
   /**
    * ETag generation
-   * - false: disabled
-   * - 'weak': weak ETags (default)
-   * - 'strong': strong ETags
+   *
+   * When omitted, defaults to 'weak' at runtime.
+   *
+   * - `false`: disabled
+   * - `'weak'`: weak ETags (default)
+   * - `'strong'`: strong ETags
+   *
    * @default 'weak'
    */
   etag?: false | 'weak' | 'strong';

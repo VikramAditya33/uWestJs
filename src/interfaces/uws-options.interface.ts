@@ -116,6 +116,47 @@ export interface UwsAdapterOptions {
    * ```
    */
   moduleRef?: ModuleRef;
+
+  /**
+   * Existing uWS App instance to use
+   *
+   * **Advanced usage** - This option allows HTTP and WebSocket to share the same uWS server instance.
+   *
+   * When provided, the adapter will use this existing uWS App instance instead of creating a new one.
+   * This enables unified HTTP + WebSocket on a single port, which is the primary use case for
+   * UwsPlatformAdapter.
+   *
+   * **Port Handling**: When `uwsApp` is provided, the `port` option is ignored by this adapter.
+   * The external uWS instance controls port binding. You must call `.listen()` on the shared
+   * instance separately to bind to a port.
+   *
+   * @remarks
+   * This is an advanced option primarily used internally by UwsPlatformAdapter. External usage
+   * is supported but requires careful coordination of the uWS instance lifecycle.
+   *
+   * **Stability**: This API is stable but requires understanding of uWS lifecycle management.
+   *
+   * @example
+   * ```typescript
+   * // Advanced: Share uWS instance between HTTP and WebSocket
+   * const uwsApp = uWS.App();
+   *
+   * // Use for HTTP (port is controlled by platformAdapter.listen())
+   * const platformAdapter = new UwsPlatformAdapter({ uwsApp });
+   *
+   * // Use for WebSocket (shares the same instance, port option ignored)
+   * const wsAdapter = new UwsAdapter(app, {
+   *   uwsApp, // Same instance
+   *   // port is ignored when uwsApp is provided
+   * });
+   *
+   * // Bind to port through the platform adapter
+   * await app.listen(3000); // This calls platformAdapter.listen(3000)
+   * ```
+   *
+   * @since 2.0.0
+   */
+  uwsApp?: uWS.TemplatedApp;
 }
 
 /**

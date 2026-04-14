@@ -1,6 +1,17 @@
 import type { HttpResponse } from 'uWebSockets.js';
 
 /**
+ * Buffer watermark for backpressure management
+ *
+ * When buffered data exceeds this threshold, the parser pauses to prevent
+ * excessive memory usage. The parser resumes when the consumer processes
+ * the buffered data.
+ *
+ * @internal Exported for testing purposes
+ */
+export const BUFFER_WATERMARK = 128 * 1024; // 128KB
+
+/**
  * Body parser modes
  * - awaiting: Buffering chunks until consumer decides what to do
  * - buffering: Actively consuming chunks via callback
@@ -35,6 +46,8 @@ export class BodyParser {
   private aborted = false;
   private abortError?: Error;
   private pendingReject?: (error: Error) => void;
+  private bufferPromise?: Promise<Buffer>;
+  private abortCallback?: () => void;
 
   constructor(
     private readonly uwsRes: HttpResponse,
@@ -52,10 +65,11 @@ export class BodyParser {
 
     // Get transfer-encoding header
     // Per RFC 7230, Transfer-Encoding can contain multiple codings (e.g., "gzip, chunked")
-    // We need to check if "chunked" is present anywhere in the value
+    // and multiple Transfer-Encoding headers should be combined
+    // We need to check if "chunked" is present anywhere in the value(s)
     const transferEncoding = headers['transfer-encoding'];
     const transferEncodingStr = Array.isArray(transferEncoding)
-      ? transferEncoding[0]
+      ? transferEncoding.join(', ')
       : transferEncoding;
     const isChunked = transferEncodingStr?.toLowerCase().includes('chunked') ?? false;
 
@@ -72,10 +86,15 @@ export class BodyParser {
         this.abortError = new Error('Connection aborted');
         this.flushing = true; // Stop processing chunks
 
-        // If we have a passthrough callback waiting, reject it immediately
-        if (this.passthroughCallback) {
-          // Call with empty chunk to trigger rejection check
-          this.passthroughCallback(Buffer.alloc(0), false);
+        // Reject pending promise via dedicated abort callback
+        if (this.abortCallback) {
+          this.abortCallback();
+        }
+
+        // Also reject via pendingReject if set (for size limit errors)
+        if (this.pendingReject) {
+          this.pendingReject(this.abortError);
+          this.pendingReject = undefined;
         }
       });
 
@@ -97,6 +116,12 @@ export class BodyParser {
    * @param isLast - Whether this is the last chunk
    */
   private onChunk(chunk: Buffer, isLast: boolean): void {
+    // Skip processing if connection was aborted
+    // This prevents race conditions where chunks arrive after abort
+    if (this.aborted) {
+      return;
+    }
+
     // Ignore empty chunks unless it's the last one
     if (chunk.length === 0 && !isLast) {
       return;
@@ -126,9 +151,9 @@ export class BodyParser {
           // Chunk is already a Buffer copy (created in onChunk), no need to copy again
           this.bufferedChunks.push(chunk);
 
-          // Pause if we've buffered too much (128KB watermark)
+          // Pause if we've buffered too much (prevent excessive memory usage)
           // This prevents excessive memory usage while waiting for consumer
-          if (this.receivedBytes > 128 * 1024) {
+          if (this.receivedBytes > BUFFER_WATERMARK) {
             this.pause();
           }
           break;
@@ -158,7 +183,7 @@ export class BodyParser {
    * Pause receiving body data
    * Used for backpressure management
    */
-  pause(): void {
+  private pause(): void {
     if (!this.paused) {
       this.paused = true;
       this.uwsRes.pause();
@@ -169,7 +194,7 @@ export class BodyParser {
    * Resume receiving body data
    * Used for backpressure management
    */
-  resume(): void {
+  private resume(): void {
     if (this.paused) {
       this.paused = false;
       this.uwsRes.resume();
@@ -182,40 +207,59 @@ export class BodyParser {
    * This switches the parser to 'buffering' mode and returns a promise
    * that resolves with the complete body buffer.
    *
+   * Multiple calls to buffer() will return the same promise, ensuring
+   * all callers receive the same data without re-parsing.
+   *
    * @returns Promise that resolves with the complete body buffer
    * @throws Error if connection is aborted or size limit exceeded
    */
-  async buffer(): Promise<Buffer> {
+  buffer(): Promise<Buffer> {
+    // Return cached promise if buffer() was already called
+    if (this.bufferPromise) {
+      return this.bufferPromise;
+    }
+
     // Check if connection was aborted
     if (this.aborted) {
-      throw this.abortError || new Error('Connection aborted');
+      return Promise.reject(this.abortError || new Error('Connection aborted'));
     }
 
     // Check if size limit already exceeded
     if (this.flushing && !this.received) {
-      throw new Error('Body size limit exceeded');
+      return Promise.reject(new Error('Body size limit exceeded'));
     }
 
     this.mode = 'buffering';
 
-    return new Promise((resolve, reject) => {
+    // Cache the promise to return for subsequent calls
+    this.bufferPromise = new Promise((resolve, reject) => {
+      // Set up dedicated abort callback for clean rejection
+      this.abortCallback = () => {
+        this.abortCallback = undefined;
+        this.pendingReject = undefined;
+        reject(this.abortError || new Error('Connection aborted'));
+      };
+
       // Store reject callback for size limit errors
       this.pendingReject = reject;
 
       // Check abort status again inside promise
       if (this.aborted) {
+        this.abortCallback = undefined;
         this.pendingReject = undefined;
         return reject(this.abortError || new Error('Connection aborted'));
       }
 
       // If no body expected, return empty buffer
       if (!this.isChunkedTransfer && this.expectedBytes <= 0) {
+        this.abortCallback = undefined;
         this.pendingReject = undefined;
         return resolve(Buffer.alloc(0));
       }
 
       // If already received all data, flush buffered chunks and return
       if (this.received) {
+        this.abortCallback = undefined;
         this.pendingReject = undefined;
         const buffer = this.flushBufferedToBuffer();
         return resolve(buffer);
@@ -226,12 +270,9 @@ export class BodyParser {
         const chunks: Buffer[] = [];
 
         this.passthroughCallback = (chunk, isLast) => {
-          if (this.aborted) {
-            this.pendingReject = undefined;
-            return reject(this.abortError || new Error('Connection aborted'));
-          }
           chunks.push(chunk);
           if (isLast) {
+            this.abortCallback = undefined;
             this.pendingReject = undefined;
             resolve(Buffer.concat(chunks));
           }
@@ -240,16 +281,22 @@ export class BodyParser {
         // Flush buffered chunks
         this.flushBuffered();
       } else {
-        // For known content-length, allocate exact buffer for efficiency
-        const buffer = Buffer.allocUnsafe(this.expectedBytes);
+        // For known content-length, check size limit before allocating
+        if (this.expectedBytes > this.limitBytes) {
+          const error = new Error('Body size limit exceeded');
+          this.pendingReject = undefined;
+          this.uwsRes.close();
+          reject(error);
+          return;
+        }
+
+        // Allocate exact buffer
+        // Use alloc() instead of allocUnsafe() to prevent memory exposure if client
+        // sends fewer bytes than Content-Length (premature disconnect)
+        const buffer = Buffer.alloc(this.expectedBytes);
         let offset = 0;
 
         this.passthroughCallback = (chunk, isLast) => {
-          if (this.aborted) {
-            this.pendingReject = undefined;
-            return reject(this.abortError || new Error('Connection aborted'));
-          }
-
           // Guard against malformed requests sending more than Content-Length
           const bytesToCopy = Math.min(chunk.length, buffer.length - offset);
           if (bytesToCopy > 0) {
@@ -258,8 +305,11 @@ export class BodyParser {
           }
 
           if (isLast) {
+            this.abortCallback = undefined;
             this.pendingReject = undefined;
-            resolve(buffer);
+            // Return only the filled portion to handle cases where client sends
+            // fewer bytes than Content-Length (premature disconnect)
+            resolve(offset === buffer.length ? buffer : buffer.subarray(0, offset));
           }
         };
 
@@ -267,6 +317,8 @@ export class BodyParser {
         this.flushBuffered();
       }
     });
+
+    return this.bufferPromise;
   }
 
   /**
@@ -274,17 +326,26 @@ export class BodyParser {
    */
   private flushBuffered(): void {
     if (this.bufferedChunks.length > 0) {
-      for (let i = 0; i < this.bufferedChunks.length; i++) {
-        const chunk = this.bufferedChunks[i];
-        const isLast = i === this.bufferedChunks.length - 1 && this.received;
-
-        if (this.passthroughCallback) {
-          // Chunk is already a Buffer, no need to convert
-          this.passthroughCallback(chunk, isLast);
-        }
-      }
-
+      // Capture chunks and clear buffer before processing
+      // This prevents issues if callback throws or modifies state
+      const chunks = this.bufferedChunks;
       this.bufferedChunks = [];
+
+      try {
+        for (let i = 0; i < chunks.length; i++) {
+          const isLast = i === chunks.length - 1 && this.received;
+
+          if (this.passthroughCallback) {
+            // Chunk is already a Buffer, no need to convert
+            this.passthroughCallback(chunks[i], isLast);
+          }
+        }
+      } finally {
+        // Always resume, even if callback throws
+        // This prevents the stream from being stuck in paused state
+        this.resume();
+      }
+      return;
     }
 
     // Resume if we had paused due to buffering
@@ -321,7 +382,9 @@ export class BodyParser {
   }
 
   /**
-   * Get expected number of bytes (or 0 for chunked transfer)
+   * Get expected number of bytes
+   *
+   * @returns -1 if no body expected, 0 for chunked transfer encoding, or the Content-Length value
    */
   get bytesExpected(): number {
     return this.expectedBytes;

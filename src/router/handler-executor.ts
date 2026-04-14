@@ -1,10 +1,7 @@
 import { ForbiddenException, Logger } from '@nestjs/common';
 import 'reflect-metadata';
-import {
-  PARAM_ARGS_METADATA,
-  ParamMetadata,
-  ParamType,
-} from '../decorators/message-body.decorator';
+import { PARAM_ARGS_METADATA, ParamType } from '../decorators/message-body.decorator';
+import type { ParamMetadata } from '../decorators/message-body.decorator';
 import { GuardExecutor, WsExecutionContext } from '../middleware/guards';
 import { PipeExecutor } from '../middleware/pipes';
 import { ExceptionFilterExecutor, WsArgumentsHost } from '../middleware/filters';

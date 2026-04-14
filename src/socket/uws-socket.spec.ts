@@ -268,16 +268,18 @@ describe('UwsSocketImpl', () => {
       const typedSocket = socket as UwsSocketImpl<UserData>;
       typedSocket.data = {
         userId: 'user-123',
-        username: 'john_doe',
+        username: 'vikram_aditya',
         role: 'admin',
       };
 
       expect(typedSocket.data.userId).toBe('user-123');
-      expect(typedSocket.data.username).toBe('john_doe');
+      expect(typedSocket.data.username).toBe('vikram_aditya');
       expect(typedSocket.data.role).toBe('admin');
 
-      typedSocket.data = { userId: 'user-456', username: 'jane_doe', role: 'user' };
+      typedSocket.data = { userId: 'user-456', username: 'paan_singh_tomar', role: 'user' };
       expect(typedSocket.data.userId).toBe('user-456');
+      expect(typedSocket.data.username).toBe('paan_singh_tomar');
+      expect(typedSocket.data.role).toBe('user');
     });
   });
 });

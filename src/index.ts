@@ -6,6 +6,9 @@
 // Core adapter
 export { UwsAdapter } from './adapter/uws.adapter';
 
+// HTTP Platform Adapter (v2.0.0)
+export { UwsPlatformAdapter } from './platform/uws-platform.adapter';
+
 // Decorators
 export * from './decorators';
 

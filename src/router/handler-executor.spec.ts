@@ -96,7 +96,7 @@ function createGateway(
 describe('HandlerExecutor', () => {
   let executor: HandlerExecutor;
   const mockClient = { id: 'client-123' };
-  const mockData = { message: 'hello', text: 'hello world', user: 'john' };
+  const mockData = { message: 'hello', text: 'hello world', user: 'vikram' };
 
   beforeEach(() => {
     executor = new HandlerExecutor();
@@ -151,7 +151,7 @@ describe('HandlerExecutor', () => {
         [{ index: 0, type: ParamType.PAYLOAD, data: 'user' }]
       );
       const propertyResult = await executor.execute(propertyGateway, 'handleMessage', {}, mockData);
-      expect(propertyResult).toEqual({ success: true, response: 'john' });
+      expect(propertyResult).toEqual({ success: true, response: 'vikram' });
     });
 
     it('should return entire array when data is array with property extraction', async () => {
@@ -198,7 +198,7 @@ describe('HandlerExecutor', () => {
 
       expect(result).toEqual({
         success: true,
-        response: { client: mockClient, text: 'hello world', user: 'john' },
+        response: { client: mockClient, text: 'hello world', user: 'vikram' },
       });
     });
 

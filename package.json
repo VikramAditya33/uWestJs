@@ -66,10 +66,10 @@
   },
   "dependencies": {
     "busboy": "^1.6.0",
+    "content-disposition": "^1.1.0",
     "cookie": "^1.1.1",
     "cookie-signature": "^1.2.2",
     "mime-types": "^3.0.2",
-    "statuses": "^2.0.2",
     "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.60.0"
   },
   "devDependencies": {
@@ -80,6 +80,7 @@
     "@nestjs/testing": "^11.0.0",
     "@nestjs/websockets": "^11.0.0",
     "@types/busboy": "^1.5.4",
+    "@types/content-disposition": "^0.5.8",
     "@types/cookie-signature": "^1.1.2",
     "@types/jest": "^30.0.0",
     "@types/mime-types": "^3.0.1",

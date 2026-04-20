@@ -1,5 +1,7 @@
 import type { HttpRequest, HttpResponse } from 'uWebSockets.js';
 import { BodyParser } from './body-parser';
+import * as cookie from 'cookie';
+import * as signature from 'cookie-signature';
 
 /**
  * Headers that should NOT be duplicated per HTTP spec
@@ -56,6 +58,10 @@ export class UwsRequest {
   private cachedHeaders?: Record<string, string | string[]>;
   private cachedQueryParams?: Record<string, string | string[]>;
   private cachedParams?: Record<string, string>;
+  private cachedCookies?: Record<string, string>;
+
+  // Cookie secret for Express-compatible signedCookies property
+  private cookieSecret?: string;
 
   // Reference to response (for body parsing later)
   private readonly uwsRes: HttpResponse;
@@ -179,6 +185,130 @@ export class UwsRequest {
   }
 
   /**
+   * Get parsed cookies (lazy evaluation)
+   *
+   * Parses the Cookie header and returns an object of cookie name-value pairs.
+   * Cookies are parsed on first access and cached for performance.
+   *
+   * @returns Object containing cookie name-value pairs
+   *
+   * @example
+   * ```typescript
+   * // Cookie header: "session=abc123; user=vikram"
+   * const cookies = req.cookies;
+   * console.log(cookies.session); // "abc123"
+   * console.log(cookies.user); // "vikram"
+   * ```
+   */
+  get cookies(): Record<string, string> {
+    if (this.cachedCookies) {
+      return this.cachedCookies;
+    }
+
+    const cookieHeader = this.headers['cookie'];
+    if (!cookieHeader) {
+      this.cachedCookies = {};
+      return this.cachedCookies;
+    }
+
+    // Cookie header is always a string (never array)
+    const cookieString = Array.isArray(cookieHeader) ? cookieHeader.join('; ') : cookieHeader;
+    const parsed = cookie.parse(cookieString);
+
+    // Filter out undefined values (cookie.parse can return undefined for malformed cookies)
+    this.cachedCookies = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (value !== undefined) {
+        this.cachedCookies[key] = value;
+      }
+    }
+
+    return this.cachedCookies;
+  }
+
+  /**
+   * Get parsed signed cookies (Express-compatible property)
+   *
+   * Returns signed cookies using the secret set via _setCookieSecret().
+   * This is the Express-compatible API that works with cookie-parser middleware pattern.
+   *
+   * If no secret is set, returns an empty object.
+   *
+   * @returns Object containing signed cookie name-value pairs
+   *
+   * @example
+   * ```typescript
+   * // Set secret (typically done by middleware or platform)
+   * req._setCookieSecret('my-secret');
+   *
+   * // Access signed cookies (Express-compatible)
+   * const cookies = req.signedCookies;
+   * console.log(cookies.session); // "abc123" (if signature is valid)
+   * ```
+   */
+  get signedCookies(): Record<string, string> {
+    if (!this.cookieSecret) {
+      return {};
+    }
+    return this.getSignedCookies(this.cookieSecret);
+  }
+
+  /**
+   * Get parsed signed cookies with explicit secret (method API)
+   *
+   * Parses signed cookies and verifies their signatures.
+   * Supports two formats for backward compatibility:
+   * - Express format: 's:value.signature' (with 's:' prefix)
+   * - Direct format: 'value.signature' (without prefix)
+   *
+   * Only returns cookies with valid signatures.
+   *
+   * This is an alternative API that allows passing the secret explicitly,
+   * useful for advanced use cases like multi-tenant applications.
+   *
+   * Note: This method does not cache results because the secret parameter may vary.
+   * However, it's typically called only once per request, so performance impact is minimal.
+   *
+   * @param secret - Secret key used to sign cookies
+   * @returns Object containing signed cookie name-value pairs
+   *
+   * @example
+   * ```typescript
+   * // Explicit secret (useful for multi-tenant scenarios)
+   * const cookies = req.getSignedCookies('my-secret');
+   * console.log(cookies.session); // "abc123" (if signature is valid)
+   * ```
+   */
+  getSignedCookies(secret: string): Record<string, string> {
+    const result: Record<string, string> = {};
+
+    for (const [name, value] of Object.entries(this.cookies)) {
+      // Handle both formats: 's:value.signature' and 'value.signature'
+      const signedValue = value.startsWith('s:') ? value.slice(2) : value;
+      const unsigned = signature.unsign(signedValue, secret);
+
+      if (unsigned !== false) {
+        result[name] = unsigned;
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Set cookie secret for signed cookies
+   *
+   * This is typically called by middleware or the platform adapter to set
+   * the secret used for the Express-compatible signedCookies property.
+   *
+   * @param secret - Secret key used to sign cookies
+   * @internal
+   */
+  _setCookieSecret(secret: string): void {
+    this.cookieSecret = secret;
+  }
+
+  /**
    * Get a specific header value (case-insensitive)
    *
    * @param name - Header name
@@ -214,6 +344,19 @@ export class UwsRequest {
         this.cachedParams[paramName] = paramValue;
       }
     }
+  }
+
+  /**
+   * Set path parameters (used by route registry for pattern matching)
+   *
+   * This is an internal API used by RouteRegistry to set extracted parameters
+   * from route pattern matching. Not intended for public use.
+   *
+   * @internal
+   * @param params - Extracted route parameters
+   */
+  _setParams(params: Record<string, string>): void {
+    this.cachedParams = params;
   }
 
   /**
@@ -285,13 +428,22 @@ export class UwsRequest {
 
   /**
    * Get content length header
+   *
+   * Per RFC 7230, Content-Length must contain only decimal digits.
+   * Rejects invalid values like "10abc", "10.5", "1e3", negative numbers, and unsafe integers.
    */
   get contentLength(): number | undefined {
     const cl = this.get('content-length');
     const value = Array.isArray(cl) ? cl[0] : cl;
     if (!value) return undefined;
-    const parsed = parseInt(value, 10);
-    return Number.isNaN(parsed) ? undefined : parsed;
+
+    const trimmed = value.trim();
+    // RFC 7230: Content-Length must be decimal digits only
+    if (!/^\d+$/.test(trimmed)) return undefined;
+
+    const parsed = Number(trimmed);
+    // Reject unsafe integers (beyond Number.MAX_SAFE_INTEGER)
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
   }
 
   /**
@@ -299,8 +451,10 @@ export class UwsRequest {
    *
    * Supports multiple matching patterns:
    * - Full MIME type: is('application/json')
-   * - Subtype only: is('json') matches 'application/json'
+   * - Subtype only: is('json') matches 'application/json' and 'application/vnd.api+json'
    * - Type prefix: is('text') matches 'text/plain', 'text/html', etc.
+   *
+   * Handles structured syntax suffixes per RFC 6839 (e.g., +json, +xml).
    *
    * @param type - MIME type or pattern to check
    * @returns true if content-type matches
@@ -318,8 +472,10 @@ export class UwsRequest {
       return true;
     }
 
-    // Subtype match (e.g., is('json') matches 'application/json')
-    if (normalizedCt.endsWith('/' + normalizedType)) {
+    // Subtype match (e.g., is('json') matches 'application/json' and 'application/vnd.api+json')
+    // Supports both exact subtype and structured syntax suffixes (RFC 6839)
+    const subtype = normalizedCt.split('/')[1] ?? '';
+    if (subtype === normalizedType || subtype.endsWith(`+${normalizedType}`)) {
       return true;
     }
 
@@ -498,13 +654,13 @@ export class UwsRequest {
    * @returns Promise that resolves with the parsed body
    */
   get body(): Promise<unknown> {
-    const contentType = this.contentType || '';
-
-    if (contentType.includes('application/json')) {
+    // Use is() method for robust content-type matching
+    // This handles edge cases like application/vnd.api+json and charset parameters
+    if (this.is('json')) {
       return this.json();
-    } else if (contentType.includes('application/x-www-form-urlencoded')) {
+    } else if (this.is('application/x-www-form-urlencoded')) {
       return this.urlencoded();
-    } else if (contentType.includes('text/')) {
+    } else if (this.is('text')) {
       return this.text();
     } else {
       return this.buffer();

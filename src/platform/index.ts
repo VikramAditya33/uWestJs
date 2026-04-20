@@ -3,22 +3,23 @@
  * @module platform
  */
 
-// Platform adapter will be exported here in Phase 2
-// export * from './uws-platform.adapter';
+// Platform adapter
+export { UwsPlatformAdapter } from './uws-platform.adapter';
 
-// Request/Response wrappers (Phase 1) (done)
-export * from './uws-request';
-export * from './uws-response';
+// Request/Response wrappers
+export { UwsRequest } from './uws-request';
+export { UwsResponse, HIGH_WATERMARK } from './uws-response';
+export type { CookieOptions } from './uws-response';
 
-// Body parser (Phase 2 Task 2.1) (done)
-export * from './body-parser';
+// Body parser
+export { BodyParser, BUFFER_WATERMARK } from './body-parser';
 
-// Route registry will be exported here in Phase 2
-// export * from './route-registry';
+// Route registry
+export { RouteRegistry } from './route-registry';
 
-// HTTP execution context will be exported here in Phase 2
-// export * from './http-context';
+// HTTP execution context will be exported here in Phase 3
+// export { HttpContext } from './http-context';
 
-// Advanced features will be exported here in Phase 3-4
-// export * from './multipart-handler';
-// export * from './static-file-handler';
+// Advanced features will be exported here in Phase 4
+// export { MultipartHandler } from './multipart-handler';
+// export { StaticFileHandler } from './static-file-handler';

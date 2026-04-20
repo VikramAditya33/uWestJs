@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-function-type */
 
 import { AbstractHttpAdapter } from '@nestjs/core';
+import { RequestMethod } from '@nestjs/common';
 import * as uWS from 'uWebSockets.js';
 import { UwsAdapter } from '../adapter/uws.adapter';
 import { UwsRequest } from './uws-request';
@@ -414,6 +415,36 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
     this.routeRegistry.register(method.toUpperCase(), path, handler as any);
   }
 
+  /**
+   * Register a route with metadata (guards, pipes, filters)
+   *
+   * This method is used by NestJS to register routes with their associated
+   * middleware metadata (guards, pipes, exception filters). The metadata
+   * is passed to the route registry which executes the middleware pipeline.
+   *
+   * @param method - HTTP method (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD, ALL)
+   * @param path - Route path (NestJS format with :param or :param?)
+   * @param handler - Route handler function
+   * @param metadata - Middleware metadata (guards, pipes, filters)
+   *
+   * @example
+   * ```typescript
+   * adapter.registerRouteWithMetadata('GET', '/users/:id', handler, {
+   *   guards: [AuthGuard],
+   *   pipes: [ValidationPipe],
+   *   filters: [HttpExceptionFilter]
+   * });
+   * ```
+   */
+  registerRouteWithMetadata(
+    method: string,
+    path: string,
+    handler: Function,
+    metadata: import('./route-registry').RouteMetadata
+  ): void {
+    this.routeRegistry.register(method.toUpperCase(), path, handler as any, metadata);
+  }
+
   // ============================================================================
   // Middleware Registration (Phase 4)
   // ============================================================================
@@ -521,11 +552,62 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
 
   /**
    * Create middleware proxy (required by AbstractHttpAdapter)
+   *
+   * This method is called by NestJS to create a middleware factory function
+   * for a specific HTTP method. The factory function is then used to register
+   * routes with their handlers.
+   *
+   * The returned function accepts a path and callback (handler), and registers
+   * the route with the route registry. This allows NestJS to register routes
+   * in a platform-agnostic way.
+   *
+   * @param requestMethod - HTTP method (RequestMethod enum or lowercase string)
+   * @returns Factory function that registers routes
+   *
+   * @example
+   * ```typescript
+   * const factory = adapter.createMiddlewareFactory(RequestMethod.GET);
+   * factory('/users', (req, res) => res.send('Hello'));
+   * ```
    */
-  createMiddlewareFactory(_method: any): (path: string, callback: Function) => any {
-    return (path: string, callback: Function) => {
-      // Not yet implemented
-      return callback;
+  createMiddlewareFactory(requestMethod: any): (path: string, callback: Function) => any {
+    return (path: string, callback: Function): void => {
+      // Convert RequestMethod enum to string if needed
+      // Using the actual RequestMethod enum ensures automatic compatibility with NestJS version changes
+      const methodMap: Record<number, string> = {
+        [RequestMethod.GET]: 'GET',
+        [RequestMethod.POST]: 'POST',
+        [RequestMethod.PUT]: 'PUT',
+        [RequestMethod.DELETE]: 'DELETE',
+        [RequestMethod.PATCH]: 'PATCH',
+        [RequestMethod.ALL]: 'ALL',
+        [RequestMethod.OPTIONS]: 'OPTIONS',
+        [RequestMethod.HEAD]: 'HEAD',
+        [RequestMethod.SEARCH]: 'SEARCH',
+        [RequestMethod.PROPFIND]: 'PROPFIND',
+        [RequestMethod.PROPPATCH]: 'PROPPATCH',
+        [RequestMethod.MKCOL]: 'MKCOL',
+        [RequestMethod.COPY]: 'COPY',
+        [RequestMethod.MOVE]: 'MOVE',
+        [RequestMethod.LOCK]: 'LOCK',
+        [RequestMethod.UNLOCK]: 'UNLOCK',
+      };
+
+      let method: string;
+      if (typeof requestMethod === 'number') {
+        method = methodMap[requestMethod];
+        if (!method) {
+          throw new Error(
+            `Unsupported RequestMethod enum value: ${requestMethod}. ` +
+              `Please update the uWS adapter method map for this @nestjs/common version.`
+          );
+        }
+      } else {
+        method = String(requestMethod).toUpperCase();
+      }
+
+      // Register route with the route registry
+      this.routeRegistry.register(method, path, callback as any);
     };
   }
 

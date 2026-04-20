@@ -73,6 +73,10 @@ export class UwsRequest {
   private cachedText?: string;
   private cachedUrlencoded?: Record<string, unknown>;
 
+  // Transformed body from pipes (for NestJS middleware pipeline)
+  private hasTransformedBody = false;
+  private transformedBody?: unknown;
+
   // Promise caching for body parsing
   private bufferPromise?: Promise<Buffer>;
   private jsonPromise?: Promise<unknown>;
@@ -501,6 +505,20 @@ export class UwsRequest {
   }
 
   /**
+   * Set transformed body from pipes (called by route registry after pipe execution)
+   *
+   * This allows the middleware pipeline to store the transformed body
+   * so it can be accessed by the handler via the body getter.
+   *
+   * @param body - Transformed body from pipes
+   * @internal
+   */
+  _setTransformedBody(body: unknown): void {
+    this.hasTransformedBody = true;
+    this.transformedBody = body;
+  }
+
+  /**
    * Get raw body as Buffer
    *
    * This method buffers the entire request body into memory.
@@ -654,6 +672,11 @@ export class UwsRequest {
    * @returns Promise that resolves with the parsed body
    */
   get body(): Promise<unknown> {
+    // If body was transformed by pipes, return that instead of re-parsing
+    if (this.hasTransformedBody) {
+      return Promise.resolve(this.transformedBody);
+    }
+
     // Use is() method for robust content-type matching
     // This handles edge cases like application/vnd.api+json and charset parameters
     if (this.is('json')) {

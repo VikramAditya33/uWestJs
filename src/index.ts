@@ -16,6 +16,8 @@ export * from './decorators';
 export { UseGuards } from './middleware/guards';
 export { UsePipes } from './middleware/pipes';
 export { UseFilters } from './middleware/filters';
+export type { ModuleRef } from './middleware/module-ref';
+export { DefaultModuleRef, NestJsModuleRef } from './middleware/module-ref';
 
 // Exceptions
 export * from './exceptions';

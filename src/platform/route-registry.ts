@@ -1,13 +1,71 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as uWS from 'uWebSockets.js';
+import { isObservable, lastValueFrom } from 'rxjs';
 import { UwsRequest } from './uws-request';
 import { UwsResponse } from './uws-response';
+import { HttpExecutionContext } from './http-context';
 import type { PlatformOptions } from '../interfaces';
+import type {
+  CanActivate,
+  PipeTransform,
+  ExceptionFilter,
+  Type,
+  ExecutionContext,
+  ArgumentsHost,
+  ArgumentMetadata,
+} from '@nestjs/common';
+import { HttpException } from '@nestjs/common';
+import { ModuleRef, DefaultModuleRef } from '../middleware/module-ref';
 
 /**
  * Route handler function type
  */
 type RouteHandler = (req: UwsRequest, res: UwsResponse) => void | Promise<void>;
+
+/**
+ * Route metadata for middleware execution
+ */
+export interface RouteMetadata {
+  /**
+   * Controller class reference
+   */
+  classRef?: Type<unknown>;
+
+  /**
+   * Guards to execute before handler
+   */
+  guards?: Type<CanActivate>[];
+
+  /**
+   * Pipes to execute on request body
+   */
+  pipes?: Type<PipeTransform>[];
+
+  /**
+   * Exception filters to handle errors
+   */
+  filters?: Type<ExceptionFilter>[];
+
+  /**
+   * Optional argument metadata for pipe transformation
+   *
+   * Provides type information to pipes (especially ValidationPipe) so they can
+   * perform proper validation and transformation based on the DTO class.
+   *
+   * @example
+   * ```typescript
+   * registry.register('POST', '/users', handler, {
+   *   pipes: [ValidationPipe],
+   *   bodyMetadata: {
+   *     type: 'body',
+   *     metatype: CreateUserDto,  // ValidationPipe uses this
+   *     data: undefined,
+   *   },
+   * });
+   * ```
+   */
+  bodyMetadata?: ArgumentMetadata;
+}
 
 /**
  * Route information for tracking
@@ -20,6 +78,7 @@ interface RouteInfo {
   paramNames: string[];
   isComplex: boolean; // Uses regex matching instead of native uWS
   handler: RouteHandler; // Store the handler
+  metadata?: RouteMetadata; // Middleware metadata
 }
 
 /**
@@ -36,6 +95,26 @@ interface RouteInfo {
  * - Create request/response wrappers
  * - Initialize body parser
  * - Handle errors
+ * - Resolve guards, pipes, and filters from DI container
+ *
+ * ## Dependency Injection Support
+ *
+ * Guards, pipes, and filters are resolved from the DI container using ModuleRef.
+ * This allows them to have constructor dependencies (e.g., ConfigService, JwtService).
+ *
+ * When no ModuleRef is provided, falls back to DefaultModuleRef which instantiates
+ * classes directly (only supports parameterless constructors).
+ *
+ * @example
+ * ```typescript
+ * // With DI support
+ * const registry = new RouteRegistry(uwsApp, {
+ *   moduleRef: NestJsModuleRef.create(moduleRef)
+ * });
+ *
+ * // Without DI (tests or simple setups)
+ * const registry = new RouteRegistry(uwsApp, {});
+ * ```
  *
  * ## Route Matching Order
  *
@@ -91,11 +170,25 @@ export class RouteRegistry {
   private routes = new Map<string, RouteInfo>();
   // Track complex routes by their wildcard registration path
   private complexRoutesByWildcard = new Map<string, RouteInfo[]>();
+  private readonly logger: Required<
+    Pick<import('../interfaces/http-options.interface').Logger, 'error' | 'warn'>
+  >;
+  // Resolved module reference for DI-aware middleware instantiation
+  private readonly moduleRef: ModuleRef;
 
   constructor(
     private readonly uwsApp: uWS.TemplatedApp,
     private readonly options: PlatformOptions
-  ) {}
+  ) {
+    // Use provided logger or default to console
+    this.logger = {
+      error: options.logger?.error?.bind(options.logger) || console.error.bind(console),
+      warn: options.logger?.warn?.bind(options.logger) || console.warn.bind(console),
+    };
+    // Use provided ModuleRef (full NestJS DI) or fall back to DefaultModuleRef
+    // (no-arg constructors only — matches existing WebSocket executor behavior)
+    this.moduleRef = options.moduleRef ?? new DefaultModuleRef();
+  }
 
   /**
    * Register a route with uWS
@@ -103,9 +196,10 @@ export class RouteRegistry {
    * @param method - HTTP method (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD, ALL)
    * @param path - Route path (NestJS format with :param or :param?)
    * @param handler - Route handler function
+   * @param metadata - Optional middleware metadata (guards, pipes, filters)
    * @throws Error if route is already registered
    */
-  register(method: string, path: string, handler: RouteHandler): void {
+  register(method: string, path: string, handler: RouteHandler, metadata?: RouteMetadata): void {
     // Convert method to uWS format and normalize to uppercase for consistency
     const uwsMethod = this.convertMethod(method);
     const normalizedMethod = method.toUpperCase();
@@ -136,6 +230,7 @@ export class RouteRegistry {
       paramNames,
       isComplex,
       handler,
+      metadata,
     });
 
     // Get the uWS method function
@@ -180,7 +275,7 @@ export class RouteRegistry {
               req._initBodyParser(this.options.maxBodySize || 1024 * 1024);
 
               // Execute handler with error handling
-              await this.executeHandler(routeInfo.handler, req, res);
+              await this.executeHandler(routeInfo.handler, req, res, routeInfo.metadata);
 
               break; // Stop after first match
             }
@@ -224,6 +319,7 @@ export class RouteRegistry {
         paramNames,
         isComplex,
         handler,
+        metadata,
       });
     } else {
       // Simple route - use native uWS routing
@@ -239,38 +335,254 @@ export class RouteRegistry {
           req._initBodyParser(this.options.maxBodySize || 1024 * 1024);
 
           // Execute handler with error handling
-          await this.executeHandler(handler, req, res);
+          await this.executeHandler(handler, req, res, metadata);
         }
       );
     }
   }
 
   /**
-   * Execute a route handler with error handling
+   * Execute a route handler with middleware pipeline
    *
-   * Wraps handler execution with try/catch to handle errors gracefully.
-   * Logs errors for debugging and sends a 500 response if headers haven't been sent.
+   * Executes the full middleware pipeline:
+   * 1. Guards - Authorization checks
+   * 2. Body parsing - Parse request body if present
+   * 3. Pipes - Transform/validate body
+   * 4. Handler - Execute route handler
+   * 5. Exception filters - Handle errors
    *
    * @param handler - Route handler function
    * @param req - Request wrapper
    * @param res - Response wrapper
+   * @param metadata - Optional middleware metadata
    */
   private async executeHandler(
     handler: RouteHandler,
     req: UwsRequest,
-    res: UwsResponse
+    res: UwsResponse,
+    metadata?: RouteMetadata
   ): Promise<void> {
     try {
-      await handler(req, res);
-    } catch (error) {
-      // Log error for debugging (server-side only)
-      console.error('Unhandled route error:', error);
+      // Create execution context for middleware
+      const context = new HttpExecutionContext(req, res, handler, metadata?.classRef);
 
-      // Handle errors - only send response if headers not sent
-      if (!res.headersSent) {
-        // Send generic error response without leaking internal details
-        res.status(500);
-        res.send({
+      // 1. Execute guards
+      // Guards can either:
+      // - Return false → 403 Forbidden (handled here)
+      // - Throw exception → Propagates to exception filters (preserves HttpException status)
+      if (metadata?.guards && metadata.guards.length > 0) {
+        const canActivate = await this.executeGuards(context, metadata.guards);
+
+        if (!canActivate) {
+          if (!res.headersSent) {
+            res.status(403).send({
+              statusCode: 403,
+              message: 'Forbidden',
+            });
+          }
+          return;
+        }
+      }
+
+      // 2. Parse body if content-type header is present
+      let body: unknown;
+      if (req.contentType) {
+        body = await req.body;
+      }
+
+      // 3. Execute pipes on body
+      // Run pipes if content-type was present (body was parsed), even for falsy values like null, 0, "", false
+      if (metadata?.pipes && metadata.pipes.length > 0 && req.contentType) {
+        body = await this.executePipes(metadata.pipes, body, metadata.bodyMetadata);
+        // Attach transformed body to request so handler can access it via req.body
+        req._setTransformedBody(body);
+      }
+
+      // 4. Execute handler
+      const result = await handler(req, res);
+
+      // 5. Send result if not already sent
+      if (!res.headersSent && result !== undefined) {
+        res.send(result);
+      }
+    } catch (error) {
+      // Execute exception filters
+      await this.handleException(error as Error, req, res, handler, metadata);
+    }
+  }
+
+  /**
+   * Execute guards for authorization
+   *
+   * Guards can control access in two ways:
+   * 1. Return false → Results in 403 Forbidden response
+   * 2. Throw exception → Handled by exception filters (can preserve HttpException status codes)
+   *
+   * This matches NestJS behavior where guards throwing HttpException (e.g., UnauthorizedException)
+   * are handled by exception filters, allowing custom status codes and responses.
+   *
+   * @param context - Execution context
+   * @param guards - Guard types to execute
+   * @returns true if all guards pass, false if any guard denies access
+   * @throws Error if guard throws (will be handled by exception filters)
+   */
+  private async executeGuards(
+    context: HttpExecutionContext,
+    guards: Type<CanActivate>[]
+  ): Promise<boolean> {
+    for (const GuardType of guards) {
+      try {
+        // Resolve guard from DI container (or instantiate if no DI)
+        const guard = this.moduleRef.get(GuardType);
+
+        // Execute guard - cast to ExecutionContext for compatibility
+        // Guards can return boolean, Promise<boolean>, or Observable<boolean>
+        const guardResult = guard.canActivate(context as ExecutionContext);
+        const canActivate = isObservable(guardResult)
+          ? await lastValueFrom(guardResult)
+          : await guardResult;
+
+        if (!canActivate) {
+          return false;
+        }
+      } catch (error) {
+        // Guard threw an error - propagate to exception filters
+        // This allows HttpException status codes to be preserved
+        this.logger.error(`Guard ${GuardType.name} threw an error:`, error);
+        throw error;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Execute pipes for transformation/validation
+   *
+   * @param pipes - Pipe types to execute
+   * @param value - Value to transform
+   * @param argMetadata - Optional argument metadata for pipes (provides metatype for validation)
+   * @returns Transformed value
+   */
+  private async executePipes(
+    pipes: Type<PipeTransform>[],
+    value: unknown,
+    argMetadata?: ArgumentMetadata
+  ): Promise<unknown> {
+    let transformedValue = value;
+
+    // Use provided metadata or default to body with undefined metatype
+    const metadata: ArgumentMetadata = argMetadata ?? {
+      type: 'body',
+      metatype: undefined,
+      data: undefined,
+    };
+
+    for (const PipeType of pipes) {
+      try {
+        // Resolve pipe from DI container (or instantiate if no DI)
+        const pipe = this.moduleRef.get(PipeType);
+
+        // Execute pipe - pipes can return value, Promise<value>, or Observable<value>
+        const pipeResult = pipe.transform(transformedValue, metadata);
+        transformedValue = isObservable(pipeResult)
+          ? await lastValueFrom(pipeResult)
+          : await pipeResult;
+      } catch (error) {
+        // Pipe threw an error - propagate to exception filters
+        this.logger.error(`Pipe ${PipeType.name} threw an error:`, error);
+        throw error;
+      }
+    }
+
+    return transformedValue;
+  }
+
+  /**
+   * Handle exceptions with filters
+   *
+   * @param error - Error that was thrown
+   * @param req - Request wrapper
+   * @param res - Response wrapper
+   * @param handler - Route handler
+   * @param metadata - Optional middleware metadata
+   */
+  private async handleException(
+    error: Error,
+    req: UwsRequest,
+    res: UwsResponse,
+    handler: RouteHandler,
+    metadata?: RouteMetadata
+  ): Promise<void> {
+    // Log error for debugging (server-side only)
+    this.logger.error('Unhandled route error:', error);
+
+    // Execute exception filters if provided
+    if (metadata?.filters && metadata.filters.length > 0) {
+      const context = new HttpExecutionContext(req, res, handler, metadata.classRef);
+      const filterErrors: Array<{ filterName: string; error: Error }> = [];
+
+      for (const FilterType of metadata.filters) {
+        try {
+          // Resolve filter from DI container (or instantiate if no DI)
+          const filter = this.moduleRef.get(FilterType);
+
+          // Create arguments host
+          const host = this.createArgumentsHost(context);
+
+          // Execute filter
+          await filter.catch(error, host);
+
+          // If filter handled the error and sent a response, we're done
+          if (res.headersSent) {
+            // If any filters failed, log them for debugging
+            if (filterErrors.length > 0) {
+              this.logger.error(
+                `${filterErrors.length} exception filter(s) failed before successful handling:`,
+                filterErrors
+              );
+            }
+            return;
+          }
+        } catch (filterError) {
+          // Accumulate filter errors for debugging
+          filterErrors.push({
+            filterName: FilterType.name,
+            error: filterError as Error,
+          });
+          this.logger.error(`Exception filter ${FilterType.name} threw an error:`, filterError);
+        }
+      }
+
+      // If all filters failed or none handled the error, log accumulated errors
+      if (filterErrors.length > 0) {
+        this.logger.error(
+          `All ${filterErrors.length} exception filter(s) failed to handle the error:`,
+          filterErrors
+        );
+      }
+    }
+
+    // Default error handling if no filter handled it
+    if (!res.headersSent) {
+      // Check if error is an HttpException to preserve status code
+      if (error instanceof HttpException) {
+        const status = error.getStatus();
+        const response = error.getResponse();
+
+        // If response is an object, use it; otherwise create a standard error object
+        const errorResponse: Record<string, unknown> =
+          typeof response === 'object' && response !== null
+            ? (response as Record<string, unknown>)
+            : {
+                statusCode: status,
+                message: typeof response === 'string' ? response : error.message,
+              };
+
+        res.status(status).send(errorResponse);
+      } else {
+        // Send generic error response for non-HTTP exceptions
+        res.status(500).send({
           statusCode: 500,
           message: 'Internal Server Error',
         });
@@ -278,6 +590,27 @@ export class RouteRegistry {
     }
   }
 
+  /**
+   * Create ArgumentsHost for exception filters
+   *
+   * @param context - Execution context
+   * @returns ArgumentsHost compatible object
+   */
+  private createArgumentsHost(context: HttpExecutionContext): ArgumentsHost {
+    return {
+      getArgs: <T extends Array<unknown> = [UwsRequest, UwsResponse]>() => context.getArgs<T>(),
+      getArgByIndex: <T = UwsRequest | UwsResponse>(index: number) =>
+        context.getArgByIndex<T>(index),
+      switchToHttp: () => context.switchToHttp(),
+      switchToRpc: () => {
+        throw new Error('RPC context not supported in HTTP');
+      },
+      switchToWs: () => {
+        throw new Error('WebSocket context not supported in HTTP');
+      },
+      getType: <TContext extends string = 'http'>() => 'http' as TContext,
+    };
+  }
   /**
    * Extract static prefix from path for more specific wildcard matching
    *

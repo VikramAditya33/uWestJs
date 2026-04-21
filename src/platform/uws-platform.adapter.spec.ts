@@ -2,6 +2,7 @@ import * as uWS from 'uWebSockets.js';
 import { UwsPlatformAdapter } from './uws-platform.adapter';
 import { UwsAdapter } from '../adapter/uws.adapter';
 import { RouteRegistry } from './route-registry';
+import { createMockUwsApp } from './test-helpers';
 
 // Mock uWebSockets.js
 jest.mock('uWebSockets.js', () => ({
@@ -20,21 +21,10 @@ let mockListenSocket: any;
 
 describe('UwsPlatformAdapter', () => {
   beforeEach(() => {
-    mockListenSocket = { mock: 'socket' };
-
-    mockUwsApp = {
-      listen: jest.fn((_host, _port, callback) => {
-        callback(mockListenSocket);
-      }),
-      get: jest.fn(),
-      post: jest.fn(),
-      put: jest.fn(),
-      del: jest.fn(),
-      patch: jest.fn(),
-      options: jest.fn(),
-      head: jest.fn(),
-      any: jest.fn(),
-    };
+    // Create mock uWS app
+    const { mockApp, listenSocket } = createMockUwsApp({ listenSuccess: true });
+    mockUwsApp = mockApp;
+    mockListenSocket = listenSocket;
 
     // Reset mocks
     jest.clearAllMocks();
@@ -301,6 +291,18 @@ describe('UwsPlatformAdapter', () => {
 
         expect(mockRegistry.register).toHaveBeenCalledWith(registryMethod, path, handler);
       });
+    });
+
+    it('should throw error for unsupported RequestMethod enum value', () => {
+      const unsupportedMethodValue = 999;
+      const middlewareFactory = adapter.createMiddlewareFactory(unsupportedMethodValue);
+
+      expect(() => {
+        middlewareFactory('/test', jest.fn());
+      }).toThrow(
+        `Unsupported RequestMethod enum value: ${unsupportedMethodValue}. ` +
+          `Please update the uWS adapter method map for this @nestjs/common version.`
+      );
     });
   });
 

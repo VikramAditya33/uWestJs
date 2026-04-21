@@ -1,6 +1,7 @@
 import type { HttpRequest, HttpResponse } from 'uWebSockets.js';
 import { RouteRegistry } from './route-registry';
 import type { PlatformOptions } from '../interfaces';
+import { createMockUwsApp, createMockUwsRequest, createMockUwsResponse } from './test-helpers';
 
 type UwsHandler = (res: HttpResponse, req: HttpRequest) => void;
 
@@ -14,42 +15,21 @@ describe('RouteRegistry', () => {
 
   // Helper to create mock uWS request/response
   const createMockUwsReqRes = () => {
-    const mockUwsRes = {
-      onAborted: jest.fn(),
-      onData: jest.fn(),
-      cork: jest.fn((cb) => cb()),
-      writeStatus: jest.fn(),
-      writeHeader: jest.fn(),
-      end: jest.fn(),
-    } as unknown as HttpResponse;
+    const mockUwsReq = createMockUwsRequest({
+      method: 'get',
+      url: '/error',
+    });
 
-    const mockUwsReq = {
-      getMethod: jest.fn(() => 'get'),
-      getUrl: jest.fn(() => '/error'),
-      getQuery: jest.fn(() => ''),
-      forEach: jest.fn(),
-      getParameter: jest.fn(),
-    } as unknown as HttpRequest;
+    const { mockRes } = createMockUwsResponse();
 
-    return { mockUwsRes, mockUwsReq };
+    return { mockUwsRes: mockRes, mockUwsReq };
   };
 
   beforeEach(() => {
-    registeredRoutes = new Map();
-
-    // Mock uWS App with all HTTP methods
-    mockUwsApp = {
-      get: jest.fn((path, handler) => registeredRoutes.set(`GET:${path}`, { path, handler })),
-      post: jest.fn((path, handler) => registeredRoutes.set(`POST:${path}`, { path, handler })),
-      put: jest.fn((path, handler) => registeredRoutes.set(`PUT:${path}`, { path, handler })),
-      del: jest.fn((path, handler) => registeredRoutes.set(`DELETE:${path}`, { path, handler })),
-      patch: jest.fn((path, handler) => registeredRoutes.set(`PATCH:${path}`, { path, handler })),
-      options: jest.fn((path, handler) =>
-        registeredRoutes.set(`OPTIONS:${path}`, { path, handler })
-      ),
-      head: jest.fn((path, handler) => registeredRoutes.set(`HEAD:${path}`, { path, handler })),
-      any: jest.fn((path, handler) => registeredRoutes.set(`ANY:${path}`, { path, handler })),
-    };
+    // Create mock uWS app with route tracking
+    const { mockApp, registeredRoutes: routes } = createMockUwsApp({ trackRoutes: true });
+    mockUwsApp = mockApp;
+    registeredRoutes = routes;
 
     registry = new RouteRegistry(mockUwsApp, options);
   });
@@ -395,7 +375,16 @@ describe('RouteRegistry', () => {
     });
 
     it('should log error if headers already sent', async () => {
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+      const loggerErrorSpy = jest.fn();
+      const mockLogger = {
+        error: loggerErrorSpy,
+      };
+
+      // Create registry with custom logger
+      const registryWithLogger = new RouteRegistry(mockUwsApp, {
+        maxBodySize: 1024 * 1024,
+        logger: mockLogger,
+      });
 
       const handler = jest.fn(async (_req, res) => {
         // Start sending response (this marks headers as sent)
@@ -415,7 +404,7 @@ describe('RouteRegistry', () => {
         throw new Error('Handler error');
       });
 
-      registry.register('GET', '/error', handler);
+      registryWithLogger.register('GET', '/error', handler);
 
       const uwsHandler = registeredRoutes.get('GET:/error')?.handler;
       const { mockUwsRes, mockUwsReq } = createMockUwsReqRes();
@@ -423,14 +412,12 @@ describe('RouteRegistry', () => {
       await uwsHandler!(mockUwsRes, mockUwsReq);
 
       // Error should be logged
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Unhandled route error:', expect.any(Error));
+      expect(loggerErrorSpy).toHaveBeenCalledWith('Unhandled route error:', expect.any(Error));
 
       // Should NOT attempt to send error response when headers already sent
       // (writeStatus would have been called once by send(), not again for error)
       expect(mockUwsRes.writeStatus).toHaveBeenCalledTimes(1);
       expect(mockUwsRes.writeStatus).toHaveBeenCalledWith('200 OK');
-
-      consoleErrorSpy.mockRestore();
     });
   });
 

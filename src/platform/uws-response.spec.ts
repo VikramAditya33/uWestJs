@@ -2,30 +2,19 @@
 import type { HttpResponse } from 'uWebSockets.js';
 import { UwsResponse, HIGH_WATERMARK } from './uws-response';
 import { Readable } from 'stream';
+import { createMockUwsResponse } from './test-helpers';
 
 describe('UwsResponse', () => {
   let mockUwsRes: jest.Mocked<HttpResponse>;
-  let onAbortedCallback: () => void = () => {
-    throw new Error('onAbortedCallback not yet initialized - call createResponse() first');
-  };
+  let callbacks: ReturnType<typeof createMockUwsResponse>['callbacks'];
   let res: UwsResponse;
 
   const createResponse = () => new UwsResponse(mockUwsRes);
 
   beforeEach(() => {
-    mockUwsRes = {
-      onAborted: jest.fn((callback) => {
-        onAbortedCallback = callback;
-      }),
-      cork: jest.fn((callback) => callback()),
-      writeStatus: jest.fn(),
-      writeHeader: jest.fn(),
-      write: jest.fn(() => true), // Return true to indicate successful write (no backpressure)
-      end: jest.fn(),
-      getWriteOffset: jest.fn(() => 0),
-      tryEnd: jest.fn(() => [true, false]),
-      onWritable: jest.fn(),
-    } as unknown as jest.Mocked<HttpResponse>;
+    const mock = createMockUwsResponse({ writeSuccess: true });
+    mockUwsRes = mock.mockRes;
+    callbacks = mock.callbacks;
   });
 
   describe('constructor', () => {
@@ -40,7 +29,7 @@ describe('UwsResponse', () => {
       expect(res.isAborted).toBe(false);
       expect(res.isFinished).toBe(false);
 
-      onAbortedCallback();
+      callbacks.onAborted!();
 
       expect(res.isAborted).toBe(true);
       expect(res.isFinished).toBe(true);
@@ -475,7 +464,7 @@ describe('UwsResponse', () => {
       res = createResponse();
       const callback = jest.fn();
 
-      onAbortedCallback();
+      callbacks.onAborted!();
       mockUwsRes.cork = jest.fn();
 
       res.atomic(callback);
@@ -545,7 +534,7 @@ describe('UwsResponse', () => {
     });
 
     it('should not throw if aborted', () => {
-      onAbortedCallback();
+      callbacks.onAborted!();
       expect(() => res.send('Hello')).not.toThrow();
       expect(mockUwsRes.end).not.toHaveBeenCalled();
     });
@@ -771,7 +760,7 @@ describe('UwsResponse', () => {
 
     it.each([
       ['finished', 'isFinished', () => res.send()],
-      ['aborted', 'isAborted', () => onAbortedCallback()],
+      ['aborted', 'isAborted', () => callbacks.onAborted!()],
       ['headers sent', 'headersSent', () => res.send()],
     ])('should track %s state', (_description, property, trigger) => {
       expect(res[property as keyof UwsResponse]).toBe(false);
@@ -877,7 +866,7 @@ describe('UwsResponse', () => {
     });
 
     it('should return false if response is aborted', () => {
-      onAbortedCallback();
+      callbacks.onAborted!();
       const result = res.writeChunk('Too late');
 
       expect(result).toBe(false);
@@ -888,7 +877,7 @@ describe('UwsResponse', () => {
       res.writeChunk('First');
       res.writeChunk(' Second'); // Batched, timeout scheduled
 
-      onAbortedCallback();
+      callbacks.onAborted!();
 
       // Advance time - should not flush
       jest.advanceTimersByTime(50);
@@ -1040,7 +1029,7 @@ describe('UwsResponse', () => {
     it('should not stream if aborted', async () => {
       const readable = createManualReadable([Buffer.from('chunk')]);
 
-      onAbortedCallback();
+      callbacks.onAborted!();
 
       await res.stream(readable);
 
@@ -1062,7 +1051,7 @@ describe('UwsResponse', () => {
 
       // Simulate abort after stream() starts waiting
       await new Promise((resolve) => setImmediate(resolve));
-      onAbortedCallback();
+      callbacks.onAborted!();
 
       // Stream should resolve (not hang) and destroy should be called
       await expect(streamPromise).resolves.toBeUndefined();

@@ -16,9 +16,10 @@ export { BodyParser, BUFFER_WATERMARK } from './body-parser';
 
 // Route registry
 export { RouteRegistry } from './route-registry';
+export type { RouteMetadata } from './route-registry';
 
-// HTTP execution context will be exported here in Phase 3
-// export { HttpContext } from './http-context';
+// HTTP execution context
+export { HttpExecutionContext } from './http-context';
 
 // Advanced features will be exported here in Phase 4
 // export { MultipartHandler } from './multipart-handler';

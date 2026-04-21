@@ -1,4 +1,38 @@
 /**
+ * Logger interface for framework logging
+ * Allows users to integrate with their preferred logging solution
+ */
+export interface Logger {
+  /**
+   * Log an error message
+   * @param message - Error message
+   * @param context - Optional error context or stack trace
+   */
+  error(message: string, context?: unknown): void;
+
+  /**
+   * Log a warning message
+   * @param message - Warning message
+   * @param context - Optional warning context
+   */
+  warn?(message: string, context?: unknown): void;
+
+  /**
+   * Log an info message
+   * @param message - Info message
+   * @param context - Optional info context
+   */
+  log?(message: string, context?: unknown): void;
+
+  /**
+   * Log a debug message
+   * @param message - Debug message
+   * @param context - Optional debug context
+   */
+  debug?(message: string, context?: unknown): void;
+}
+
+/**
  * HTTP-specific options for the uWS platform adapter
  */
 export interface HttpOptions {
@@ -15,6 +49,29 @@ export interface HttpOptions {
    * ```
    */
   maxBodySize?: number;
+
+  /**
+   * Logger instance for framework logging
+   *
+   * Allows integration with custom logging solutions (Winston, Pino, etc.).
+   * If not provided, defaults to console logging.
+   *
+   * @default console
+   * @example
+   * ```typescript
+   * // Using Winston
+   * logger: {
+   *   error: (message, context) => winston.error(message, context),
+   *   warn: (message, context) => winston.warn(message, context),
+   * }
+   *
+   * // Using Pino
+   * logger: {
+   *   error: (message, context) => pino.error(context, message),
+   * }
+   * ```
+   */
+  logger?: Logger;
 
   /**
    * Body parser configuration

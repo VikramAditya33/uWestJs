@@ -128,11 +128,11 @@ interface RouteInfo {
  *
  * 1. **Register specific routes before general ones:**
  *    ```typescript
- *    // ✅ Good - specific route first
+ *    // Good - specific route first
  *    registry.register('GET', '/api/users/:id', handler1);
  *    registry.register('GET', '/api/*', handler2);
  *
- *    // ❌ Bad - general route first (will match everything)
+ *    // Bad - general route first (will match everything)
  *    registry.register('GET', '/api/*', handler2);
  *    registry.register('GET', '/api/users/:id', handler1); // Never reached!
  *    ```
@@ -175,6 +175,8 @@ export class RouteRegistry {
   >;
   // Resolved module reference for DI-aware middleware instantiation
   private readonly moduleRef: ModuleRef;
+  // CORS handler (optional)
+  private corsHandler?: import('./cors-handler').CorsHandler;
 
   constructor(
     private readonly uwsApp: uWS.TemplatedApp,
@@ -271,8 +273,11 @@ export class RouteRegistry {
               // Set extracted parameters using proper API
               req._setParams(matches);
 
-              // Initialize body parser with configured size limit
-              req._initBodyParser(this.options.maxBodySize || 1024 * 1024);
+              // Initialize body parser with configured size limit and fast abort option
+              req._initBodyParser(
+                this.options.maxBodySize || 1024 * 1024,
+                this.options.fastAbort || false
+              );
 
               // Execute handler with error handling
               await this.executeHandler(routeInfo.handler, req, res, routeInfo.metadata);
@@ -283,7 +288,13 @@ export class RouteRegistry {
 
           // If no route matched, send 404
           if (!matched) {
+            const req = new UwsRequest(uwsReq, uwsRes, []);
             const res = new UwsResponse(uwsRes);
+
+            // Handle CORS for unmatched routes (including preflight)
+            if (this.corsHandler && (await this.corsHandler.handle(req, res))) {
+              return;
+            }
 
             // Only send 404 if response hasn't been sent and isn't aborted
             // UwsResponse.send() already handles aborted state, but checking here
@@ -331,8 +342,11 @@ export class RouteRegistry {
           const req = new UwsRequest(uwsReq, uwsRes, paramNames);
           const res = new UwsResponse(uwsRes);
 
-          // Initialize body parser with configured size limit
-          req._initBodyParser(this.options.maxBodySize || 1024 * 1024);
+          // Initialize body parser with configured size limit and fast abort option
+          req._initBodyParser(
+            this.options.maxBodySize || 1024 * 1024,
+            this.options.fastAbort || false
+          );
 
           // Execute handler with error handling
           await this.executeHandler(handler, req, res, metadata);
@@ -363,6 +377,15 @@ export class RouteRegistry {
     metadata?: RouteMetadata
   ): Promise<void> {
     try {
+      // 0. Handle CORS if enabled
+      if (this.corsHandler) {
+        const handled = await this.corsHandler.handle(req, res);
+        // If preflight was handled (OPTIONS request), stop here
+        if (handled) {
+          return;
+        }
+      }
+
       // Create execution context for middleware
       const context = new HttpExecutionContext(req, res, handler, metadata?.classRef);
 
@@ -820,5 +843,44 @@ export class RouteRegistry {
    */
   getRouteCount(): number {
     return this.routes.size;
+  }
+
+  /**
+   * Register CORS handler
+   *
+   * Registers a CORS handler and adds an OPTIONS catch-all route to handle
+   * preflight requests to unregistered paths.
+   *
+   * @param handler - CORS handler instance
+   */
+  registerCorsHandler(handler: import('./cors-handler').CorsHandler): void {
+    if (!handler) {
+      throw new Error('CORS handler cannot be null or undefined');
+    }
+    if (typeof handler.handle !== 'function') {
+      throw new Error('CORS handler must have a handle method');
+    }
+    if (this.corsHandler) {
+      this.logger.warn('CORS handler is being replaced. This may indicate a configuration issue.');
+    }
+    this.corsHandler = handler;
+
+    // Register OPTIONS catch-all to handle preflight requests to unregistered paths
+    this.uwsApp.options('/*', async (uwsRes: uWS.HttpResponse, uwsReq: uWS.HttpRequest) => {
+      const req = new UwsRequest(uwsReq, uwsRes, []);
+      const res = new UwsResponse(uwsRes);
+
+      if (await handler.handle(req, res)) {
+        return;
+      }
+
+      // If CORS handler didn't handle it (e.g., origin not allowed), send 404
+      if (!res.headersSent && !res.isAborted) {
+        res.status(404).send({
+          statusCode: 404,
+          message: 'Not Found',
+        });
+      }
+    });
   }
 }

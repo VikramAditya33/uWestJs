@@ -600,4 +600,116 @@ describe('RouteRegistry', () => {
       expect(handler).toHaveBeenCalled();
     });
   });
+
+  describe('registerCorsHandler', () => {
+    it('should register CORS handler successfully', () => {
+      const mockCorsHandler = {
+        handle: jest.fn(),
+      } as any;
+
+      expect(() => registry.registerCorsHandler(mockCorsHandler)).not.toThrow();
+    });
+
+    it('should throw error when handler is null', () => {
+      expect(() => registry.registerCorsHandler(null as any)).toThrow(
+        'CORS handler cannot be null or undefined'
+      );
+    });
+
+    it('should throw error when handler is undefined', () => {
+      expect(() => registry.registerCorsHandler(undefined as any)).toThrow(
+        'CORS handler cannot be null or undefined'
+      );
+    });
+
+    it('should throw error when handler does not have handle method', () => {
+      const invalidHandler = {} as any;
+      expect(() => registry.registerCorsHandler(invalidHandler)).toThrow(
+        'CORS handler must have a handle method'
+      );
+    });
+
+    it('should warn when replacing existing CORS handler', () => {
+      const warnSpy = jest.fn();
+      const mockLogger = {
+        error: jest.fn(),
+        warn: warnSpy,
+      };
+      const registryWithLogger = new RouteRegistry(mockUwsApp, {
+        maxBodySize: 1024 * 1024,
+        logger: mockLogger,
+      });
+
+      const mockCorsHandler1 = {
+        handle: jest.fn(),
+      } as any;
+      const mockCorsHandler2 = {
+        handle: jest.fn(),
+      } as any;
+
+      registryWithLogger.registerCorsHandler(mockCorsHandler1);
+      registryWithLogger.registerCorsHandler(mockCorsHandler2);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('CORS handler is being replaced')
+      );
+    });
+
+    it('should register OPTIONS catch-all route for preflight requests', () => {
+      const mockCorsHandler = {
+        handle: jest.fn(),
+      } as any;
+
+      registry.registerCorsHandler(mockCorsHandler);
+
+      // Verify OPTIONS route was registered
+      expect(mockUwsApp.options).toHaveBeenCalledWith('/*', expect.any(Function));
+    });
+
+    it('should handle CORS for unmatched preflight requests', async () => {
+      const mockCorsHandler = {
+        handle: jest.fn().mockResolvedValue(true), // Preflight handled
+      } as any;
+
+      registry.registerCorsHandler(mockCorsHandler);
+
+      // Get the OPTIONS handler that was registered
+      const optionsHandler = (mockUwsApp.options as jest.Mock).mock.calls[0][1];
+
+      const { mockUwsRes, mockUwsReq } = createMockUwsReqRes();
+      mockUwsReq.getMethod = jest.fn().mockReturnValue('options');
+      mockUwsReq.getUrl = jest.fn().mockReturnValue('/unregistered-path');
+
+      await optionsHandler(mockUwsRes, mockUwsReq);
+
+      // CORS handler should have been called
+      expect(mockCorsHandler.handle).toHaveBeenCalled();
+
+      // 404 should NOT be sent since CORS handled it
+      expect(mockUwsRes.writeStatus).not.toHaveBeenCalledWith('404 Not Found');
+    });
+
+    it('should send 404 for unmatched preflight when CORS rejects', async () => {
+      const mockCorsHandler = {
+        handle: jest.fn().mockResolvedValue(false), // CORS did not handle (e.g., origin rejected)
+      } as any;
+
+      registry.registerCorsHandler(mockCorsHandler);
+
+      // Get the OPTIONS handler that was registered
+      const optionsHandler = (mockUwsApp.options as jest.Mock).mock.calls[0][1];
+
+      const { mockUwsRes, mockUwsReq } = createMockUwsReqRes();
+      mockUwsReq.getMethod = jest.fn().mockReturnValue('options');
+      mockUwsReq.getUrl = jest.fn().mockReturnValue('/unregistered-path');
+
+      await optionsHandler(mockUwsRes, mockUwsReq);
+
+      // CORS handler should have been called
+      expect(mockCorsHandler.handle).toHaveBeenCalled();
+
+      // 404 should be sent since CORS didn't handle it
+      expect(mockUwsRes.writeStatus).toHaveBeenCalledWith('404 Not Found');
+    });
+  });
 });

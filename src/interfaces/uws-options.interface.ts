@@ -11,11 +11,11 @@ export interface CorsOptions {
    * - string: single origin (e.g., 'https://example.com')
    * - string[]: multiple origins
    * - boolean: true = allow all (*), false = deny all
-   * - function: dynamic origin validation
+   * - function: dynamic origin validation (sync or async)
    * Note: The origin parameter can be null in privacy-sensitive contexts (sandboxed iframes, local files)
    * @example '*' | 'https://example.com' | ['https://example.com', 'https://app.example.com'] | true | false
    */
-  origin?: string | string[] | boolean | ((origin: string | null) => boolean);
+  origin?: string | string[] | boolean | ((origin: string | null) => boolean | Promise<boolean>);
 
   /**
    * Allow credentials (cookies, authorization headers, TLS client certificates)

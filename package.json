@@ -72,7 +72,10 @@
     "content-disposition": "^1.1.0",
     "cookie": "^1.1.1",
     "cookie-signature": "^1.2.2",
+    "etag": "^1.8.1",
     "mime-types": "^3.0.2",
+    "ms": "^2.1.3",
+    "range-parser": "^1.2.1",
     "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.60.0"
   },
   "devDependencies": {
@@ -85,9 +88,12 @@
     "@types/busboy": "^1.5.4",
     "@types/content-disposition": "^0.5.8",
     "@types/cookie-signature": "^1.1.2",
+    "@types/etag": "^1.8.4",
     "@types/jest": "^30.0.0",
     "@types/mime-types": "^3.0.1",
+    "@types/ms": "^2.1.0",
     "@types/node": "^20.0.0",
+    "@types/range-parser": "^1.2.7",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^10.0.0",

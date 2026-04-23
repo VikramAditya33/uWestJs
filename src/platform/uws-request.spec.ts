@@ -1,4 +1,5 @@
 import type { HttpRequest, HttpResponse } from 'uWebSockets.js';
+import { Writable } from 'stream';
 import { UwsRequest } from './uws-request';
 import { toArrayBuffer } from './test-helpers';
 import * as signature from 'cookie-signature';
@@ -350,6 +351,25 @@ describe('UwsRequest', () => {
       expect(mockUwsRes.onData).toHaveBeenCalled();
     });
 
+    it('should initialize body parser for chunked transfer encoding', () => {
+      setHeaders(['transfer-encoding', 'chunked']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      expect(mockUwsRes.onData).toHaveBeenCalled();
+      expect(req.isReceived).toBe(false); // Should expect body
+    });
+
+    it('should not initialize body parser when no content-length or transfer-encoding', () => {
+      // No headers set - no body expected
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      expect(mockUwsRes.onData).not.toHaveBeenCalled();
+      expect(req.isReceived).toBe(true); // No body expected
+    });
+
     it('should parse JSON body', async () => {
       const { req, bodyContent } = createRequestWithBody('application/json', '{"name":"Vikram"}');
 
@@ -501,6 +521,570 @@ describe('UwsRequest', () => {
 
       expect(result).toBe('Hello World');
     });
+
+    it('should enforce size limit and close connection', async () => {
+      // Set content-length larger than limit
+      setHeaders(['content-length', '2000']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1000); // 1KB limit
+
+      // Connection should be closed immediately
+      expect(mockUwsRes.close).toHaveBeenCalled();
+
+      // Request should be marked as aborted
+      expect(req.isAborted).toBe(true);
+
+      // Body promises should reject with error
+      await expect(req.buffer()).rejects.toThrow('Body size limit exceeded');
+    });
+
+    it('should enforce size limit during streaming when accumulated data exceeds limit', async () => {
+      // Use chunked encoding (no Content-Length) to test streaming limit
+      setHeaders(['transfer-encoding', 'chunked']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(50); // 50 byte limit
+
+      // Start consuming the body
+      const bufferPromise = req.buffer();
+
+      // Send chunk that exceeds limit during streaming
+      const largeChunk = Buffer.alloc(100, 'x');
+      onDataCallback(toArrayBuffer(largeChunk), true);
+
+      // Should close connection when limit exceeded during streaming
+      expect(mockUwsRes.close).toHaveBeenCalled();
+
+      // Should reject with size limit error
+      await expect(bufferPromise).rejects.toThrow('Body size limit exceeded');
+    });
+  });
+
+  describe('abort handling', () => {
+    let onAbortedCallback: () => void = () => {
+      throw new Error('onAbortedCallback not yet initialized');
+    };
+
+    beforeEach(() => {
+      mockUwsRes.onAborted = jest.fn((callback) => {
+        onAbortedCallback = callback;
+        return mockUwsRes;
+      });
+    });
+
+    it('should detect aborted connection', () => {
+      const { req } = createRequestWithBody('application/json', '{"test":"data"}');
+
+      // Add error listener to prevent unhandled error
+      req.on('error', () => {
+        // Expected error
+      });
+
+      expect(req.isAborted).toBe(false);
+
+      // Simulate connection abort
+      onAbortedCallback();
+
+      expect(req.isAborted).toBe(true);
+    });
+
+    it.each([
+      ['buffer()', 'application/json', '{"test":"data"}', (req: UwsRequest) => req.buffer()],
+      ['json()', 'application/json', '{"test":"data"}', (req: UwsRequest) => req.json()],
+      ['text()', 'text/plain', 'Hello World', (req: UwsRequest) => req.text()],
+      [
+        'urlencoded()',
+        'application/x-www-form-urlencoded',
+        'key=value',
+        (req: UwsRequest) => req.urlencoded(),
+      ],
+    ] as const)(
+      'should reject %s promise when connection is aborted',
+      async (methodName, contentType, bodyContent, method) => {
+        const { req } = createRequestWithBody(contentType, bodyContent);
+
+        const promise = method(req);
+
+        // Simulate connection abort
+        onAbortedCallback();
+
+        await expect(promise).rejects.toThrow('Connection aborted');
+      }
+    );
+
+    it('should stop processing chunks after abort', async () => {
+      const { req, bodyContent } = createRequestWithBody('application/json', '{"test":"data"}');
+
+      const bufferPromise = req.buffer();
+
+      // Simulate connection abort
+      onAbortedCallback();
+
+      // Try to send data after abort - should be ignored
+      sendBody(bodyContent);
+
+      // Promise should still reject with abort error
+      await expect(bufferPromise).rejects.toThrow('Connection aborted');
+    });
+
+    it('should emit error event on abort', (done) => {
+      const { req } = createRequestWithBody('application/json', '{"test":"data"}');
+
+      req.on('error', (error) => {
+        expect(error.message).toBe('Connection aborted');
+        done();
+      });
+
+      // Simulate connection abort
+      onAbortedCallback();
+    });
+
+    it('should handle abort during streaming mode', (done) => {
+      const { req } = createRequestWithBody('application/json', '{"test":"data"}');
+
+      // Activate streaming mode
+      req.pipe(
+        new Writable({
+          write(chunk: Buffer, encoding: string, callback: () => void) {
+            callback();
+          },
+        })
+      );
+
+      req.on('error', (error) => {
+        expect(error.message).toBe('Connection aborted');
+        done();
+      });
+
+      // Simulate connection abort
+      onAbortedCallback();
+    });
+
+    it('should throw error when getAllData is called after abort', async () => {
+      const { req } = createRequestWithBody('application/json', '{"test":"data"}');
+
+      // Add error listener to prevent unhandled error
+      req.on('error', () => {
+        // Expected error
+      });
+
+      // Simulate connection abort
+      onAbortedCallback();
+
+      // Try to get data after abort
+      await expect(req.buffer()).rejects.toThrow('Connection aborted');
+    });
+
+    it('should not emit error when no error listeners attached', () => {
+      const { req } = createRequestWithBody('application/json', '{"test":"data"}');
+
+      // Don't add error listener - this should not cause uncaught error
+      expect(req.isAborted).toBe(false);
+
+      // Simulate connection abort - should not throw
+      expect(() => onAbortedCallback()).not.toThrow();
+
+      expect(req.isAborted).toBe(true);
+    });
+  });
+
+  describe('watermark backpressure', () => {
+    it('should pause when buffered data exceeds watermark in awaiting mode', () => {
+      setHeaders(['content-type', 'application/json'], ['content-length', '200000']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      // Send large chunk that exceeds 128KB watermark
+      const largeChunk = Buffer.alloc(150 * 1024, 'x');
+      onDataCallback(toArrayBuffer(largeChunk), false);
+
+      // Should have paused due to watermark
+      expect(mockUwsRes.pause).toHaveBeenCalled();
+    });
+
+    it('should resume when switching from awaiting to buffering mode', async () => {
+      setHeaders(['content-type', 'application/json'], ['content-length', '200000']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      // Send large chunk that exceeds watermark
+      const largeChunk = Buffer.alloc(150 * 1024, 'x');
+      onDataCallback(toArrayBuffer(largeChunk), false);
+
+      expect(mockUwsRes.pause).toHaveBeenCalled();
+
+      // Start consuming body - should resume
+      const bufferPromise = req.buffer();
+
+      // Send remaining data
+      onDataCallback(toArrayBuffer(Buffer.from('}')), true);
+
+      await bufferPromise;
+
+      // Should have resumed
+      expect(mockUwsRes.resume).toHaveBeenCalled();
+    });
+
+    it('should not pause in buffering mode even with large chunks', () => {
+      setHeaders(['content-type', 'application/json'], ['content-length', '200000']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      // Start buffering immediately
+      void req.buffer();
+
+      // Send large chunk - should not pause in buffering mode
+      const largeChunk = Buffer.alloc(150 * 1024, 'x');
+      onDataCallback(toArrayBuffer(largeChunk), true);
+
+      // Should not have paused
+      expect(mockUwsRes.pause).not.toHaveBeenCalled();
+    });
+
+    it('should pause in streaming mode when push returns false', () => {
+      setHeaders(['content-type', 'application/octet-stream'], ['content-length', '1000']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      // Mock push to return false (backpressure)
+      jest.spyOn(req, 'push').mockReturnValue(false);
+
+      // Activate streaming mode
+      const writable = new Writable({
+        write(chunk: Buffer, encoding: string, callback: () => void) {
+          callback();
+        },
+      });
+      req.pipe(writable);
+
+      // Send data - should pause due to backpressure
+      onDataCallback(toArrayBuffer(Buffer.from('test data')), false);
+
+      expect(mockUwsRes.pause).toHaveBeenCalled();
+    });
+
+    it('should resume in streaming mode when _read is called', () => {
+      setHeaders(['content-type', 'application/octet-stream'], ['content-length', '1000']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      // Mock push to return false (backpressure)
+      jest.spyOn(req, 'push').mockReturnValue(false);
+
+      // Activate streaming mode
+      const writable = new Writable({
+        write(chunk: Buffer, encoding: string, callback: () => void) {
+          callback();
+        },
+      });
+      req.pipe(writable);
+
+      // Send data - should pause
+      onDataCallback(toArrayBuffer(Buffer.from('test data')), false);
+
+      expect(mockUwsRes.pause).toHaveBeenCalled();
+
+      // Call _read (consumer ready for more data)
+      req._read();
+
+      // Should have resumed
+      expect(mockUwsRes.resume).toHaveBeenCalled();
+    });
+
+    it('should resume when activating streaming mode after watermark pause', () => {
+      setHeaders(['content-type', 'application/octet-stream'], ['content-length', '200000']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      // Send large chunk that exceeds watermark in awaiting mode
+      const largeChunk = Buffer.alloc(150 * 1024, 'x');
+      onDataCallback(toArrayBuffer(largeChunk), false);
+
+      expect(mockUwsRes.pause).toHaveBeenCalled();
+
+      // Activate streaming mode - should resume
+      const writable = new Writable({
+        write(chunk: Buffer, encoding: string, callback: () => void) {
+          callback();
+        },
+      });
+      req.pipe(writable);
+
+      expect(mockUwsRes.resume).toHaveBeenCalled();
+    });
+  });
+
+  describe('streaming state', () => {
+    it('should report isReceived as false initially when body expected', () => {
+      setHeaders(['content-length', '100']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      expect(req.isReceived).toBe(false);
+    });
+
+    it('should report isReceived as true when no body expected', () => {
+      setHeaders(['content-length', '0']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      expect(req.isReceived).toBe(true);
+    });
+
+    it('should report isReceived as true after all data received', () => {
+      const { req, bodyContent } = createRequestWithBody('text/plain', 'Hello');
+
+      expect(req.isReceived).toBe(false);
+
+      sendBody(bodyContent);
+
+      expect(req.isReceived).toBe(true);
+    });
+
+    it('should track total received bytes', () => {
+      const { req } = createRequestWithBody('text/plain', 'Hello World');
+
+      expect(req.getTotalReceivedBytes()).toBe(0);
+
+      onDataCallback(toArrayBuffer(Buffer.from('Hello ')), false);
+      expect(req.getTotalReceivedBytes()).toBe(6);
+
+      onDataCallback(toArrayBuffer(Buffer.from('World')), true);
+      expect(req.getTotalReceivedBytes()).toBe(11);
+    });
+
+    it('should emit received event with total bytes', (done) => {
+      const { req, bodyContent } = createRequestWithBody('text/plain', 'Hello');
+
+      req.on('received', (totalBytes) => {
+        expect(totalBytes).toBe(5);
+        done();
+      });
+
+      sendBody(bodyContent);
+    });
+  });
+
+  describe('Hybrid Readable Stream', () => {
+    it('should buffer chunks in awaiting mode by default', () => {
+      setHeaders(['content-type', 'application/json'], ['content-length', '100']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      // Send some data
+      onDataCallback(toArrayBuffer(Buffer.from('{"test":')), false);
+      onDataCallback(toArrayBuffer(Buffer.from('"data"}')), false);
+
+      // Should be buffering in awaiting mode
+      expect(req.getTotalReceivedBytes()).toBe(15);
+      expect(req.isReceived).toBe(false);
+    });
+
+    it('should switch to buffering mode for json()', async () => {
+      const { req, bodyContent } = createRequestWithBody('application/json', '{"name":"test"}');
+
+      // Start json parsing - should switch to buffering mode
+      const jsonPromise = req.json();
+
+      // Send data
+      sendBody(bodyContent);
+
+      const result = await jsonPromise;
+      expect(result).toEqual({ name: 'test' });
+    });
+
+    it('should switch to streaming mode for pipe()', (done) => {
+      const { req } = createRequestWithBody('application/octet-stream', 'Hello World');
+
+      const chunks: Buffer[] = [];
+      const writable = new Writable({
+        write(chunk: Buffer, encoding: string, callback: () => void) {
+          chunks.push(chunk);
+          callback();
+        },
+      });
+
+      writable.on('finish', () => {
+        const result = Buffer.concat(chunks).toString();
+        expect(result).toBe('Hello World');
+        done();
+      });
+
+      // Pipe should activate streaming mode
+      req.pipe(writable);
+
+      // Send data
+      sendBody('Hello World');
+    });
+
+    it('should flush buffered chunks when activating streaming', (done) => {
+      setHeaders(['content-type', 'application/octet-stream'], ['content-length', '100']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      // Send data while in awaiting mode (will be buffered)
+      onDataCallback(toArrayBuffer(Buffer.from('Hello ')), false);
+      onDataCallback(toArrayBuffer(Buffer.from('World')), false);
+
+      // Now activate streaming mode by piping
+      const chunks: Buffer[] = [];
+      const writable = new Writable({
+        write(chunk: Buffer, encoding: string, callback: () => void) {
+          chunks.push(chunk);
+          callback();
+        },
+      });
+
+      writable.on('finish', () => {
+        const result = Buffer.concat(chunks).toString();
+        expect(result).toBe('Hello World');
+        done();
+      });
+
+      req.pipe(writable);
+
+      // Send final chunk
+      onDataCallback(toArrayBuffer(Buffer.from('')), true);
+    });
+
+    it('should activate streaming mode for non-pipe consumers', (done) => {
+      jest.useFakeTimers();
+
+      setHeaders(['content-type', 'application/octet-stream'], ['content-length', '100']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      // Send some data while in awaiting mode
+      onDataCallback(toArrayBuffer(Buffer.from('Hello ')), false);
+
+      // Use for-await-of (non-pipe consumer) which calls _read()
+      const chunks: Buffer[] = [];
+      (async () => {
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        const result = Buffer.concat(chunks).toString();
+        expect(result).toBe('Hello World');
+        jest.useRealTimers();
+        done();
+      })();
+
+      // Send more data after streaming is activated
+      // Use setImmediate for deterministic timing
+      setImmediate(() => {
+        onDataCallback(toArrayBuffer(Buffer.from('World')), true);
+      });
+
+      // Advance timers to trigger setImmediate
+      jest.runAllTimers();
+    });
+
+    it('should support multipart streaming', async () => {
+      const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+      let body = `--${boundary}\r\n`;
+      body += `Content-Disposition: form-data; name="field"\r\n\r\n`;
+      body += `value\r\n`;
+      body += `--${boundary}--\r\n`;
+
+      setHeaders(
+        ['content-type', `multipart/form-data; boundary=${boundary}`],
+        ['content-length', body.length.toString()]
+      );
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      const fields: any[] = [];
+      const parsePromise = req.multipart(async (field) => {
+        fields.push(field);
+      });
+
+      sendBody(body);
+      await parsePromise;
+
+      expect(fields).toHaveLength(1);
+      expect(fields[0].name).toBe('field');
+      expect(fields[0].value).toBe('value');
+    });
+
+    it('should throw error when multipart called after body consumed', async () => {
+      const { req, bodyContent } = createRequestWithBody('multipart/form-data', 'test');
+
+      // Consume the body first
+      sendBody(bodyContent);
+      await req.buffer();
+
+      // Try to parse multipart - should throw
+      await expect(req.multipart(async () => {})).rejects.toThrow(
+        'Cannot parse multipart: request body already consumed'
+      );
+    });
+
+    it('should throw error when content-type is not multipart', async () => {
+      const { req } = createRequestWithBody('application/json', '{"test":"data"}');
+
+      // Try to parse multipart with wrong content-type - should throw
+      await expect(req.multipart(async () => {})).rejects.toThrow(
+        'Cannot parse multipart: Content-Type must be multipart/*, got: application/json'
+      );
+    });
+
+    it('should throw error when no content-type header', async () => {
+      setHeaders(['content-length', '10']);
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+      req._initBodyParser(1024 * 1024);
+
+      // Try to parse multipart without content-type - should throw
+      await expect(req.multipart(async () => {})).rejects.toThrow(
+        'Cannot parse multipart: Content-Type must be multipart/*, got: none'
+      );
+    });
+
+    it('should emit received event with total bytes in hybrid mode', (done) => {
+      const { req, bodyContent } = createRequestWithBody('text/plain', 'Hello World');
+
+      req.on('received', (totalBytes) => {
+        expect(totalBytes).toBe(11);
+        expect(req.getTotalReceivedBytes()).toBe(11);
+        done();
+      });
+
+      sendBody(bodyContent);
+    });
+
+    it('should work with NestJS pipes and transformations', async () => {
+      const { req, bodyContent } = createRequestWithBody('application/json', '{"name":"test"}');
+
+      // Send and parse the actual body first
+      const bodyPromise = req.body;
+      sendBody(bodyContent);
+      const originalBody = await bodyPromise;
+
+      // Verify original body was parsed correctly
+      expect(originalBody).toEqual({ name: 'test' });
+
+      // Simulate NestJS pipe transformation
+      const transformedData = { name: 'TRANSFORMED' };
+      req._setTransformedBody(transformedData);
+
+      // Body getter should now return transformed data (overriding parsed body)
+      const body = await req.body;
+      expect(body).toEqual(transformedData);
+      expect(body).not.toEqual({ name: 'test' });
+    });
   });
 
   describe('cookies', () => {
@@ -561,13 +1145,13 @@ describe('UwsRequest', () => {
   describe('signedCookies', () => {
     const SECRET = 'my-secret';
 
-    const setupSignedCookie = (name: string, value: string, secret: string) => {
+    const setupSignedCookie = (name: string, value: string, secret = SECRET) => {
       const signedValue = createSignedCookie(value, secret);
       setHeaders(['cookie', `${name}=${signedValue}; user=vikram`]);
     };
 
     it('should parse and verify signed cookies with method API', () => {
-      setupSignedCookie('session', 'abc123', SECRET);
+      setupSignedCookie('session', 'abc123');
 
       const req = new UwsRequest(mockUwsReq, mockUwsRes);
       const signedCookies = req.getSignedCookies(SECRET);
@@ -576,7 +1160,7 @@ describe('UwsRequest', () => {
     });
 
     it('should parse and verify signed cookies with property API', () => {
-      setupSignedCookie('session', 'abc123', SECRET);
+      setupSignedCookie('session', 'abc123');
 
       const req = new UwsRequest(mockUwsReq, mockUwsRes);
       req._setCookieSecret(SECRET);
@@ -636,20 +1220,20 @@ describe('UwsRequest', () => {
       expect(req.getSignedCookies('secret-1')).toEqual({ session: 'abc123' });
     });
 
+    it('should return empty object from property when no secret set', () => {
+      setupSignedCookie('session', 'abc123');
+
+      const req = new UwsRequest(mockUwsReq, mockUwsRes);
+
+      expect(req.signedCookies).toEqual({});
+    });
+
     it('should return empty object when no signed cookies', () => {
       setHeaders(['cookie', 'session=abc123']);
 
       const req = new UwsRequest(mockUwsReq, mockUwsRes);
 
       expect(req.getSignedCookies(SECRET)).toEqual({});
-    });
-
-    it('should return empty object from property when no secret set', () => {
-      setupSignedCookie('session', 'abc123', SECRET);
-
-      const req = new UwsRequest(mockUwsReq, mockUwsRes);
-
-      expect(req.signedCookies).toEqual({});
     });
   });
 });

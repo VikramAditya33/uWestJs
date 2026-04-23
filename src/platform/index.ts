@@ -21,6 +21,19 @@ export type { RouteMetadata } from './route-registry';
 // HTTP execution context
 export { HttpExecutionContext } from './http-context';
 
-// Advanced features will be exported here in Phase 4
-// export { MultipartHandler } from './multipart-handler';
-// export { StaticFileHandler } from './static-file-handler';
+// Multipart form data handling
+export { MultipartFormHandler } from './multipart-handler';
+export type { MultipartHandler, MultipartField } from './multipart-handler';
+
+// Static file serving
+export { StaticFileHandler } from './static-file-handler';
+export type { StaticFileOptions } from './static-file-handler';
+export { FileWorkerPool } from './file-worker-pool';
+
+// CORS support
+export { CorsHandler } from './cors-handler';
+export type { CorsOptions } from '../interfaces/uws-options.interface';
+
+// Request/response compression
+export { CompressionHandler } from './compression-handler';
+export type { CompressionOptions } from './compression-handler';

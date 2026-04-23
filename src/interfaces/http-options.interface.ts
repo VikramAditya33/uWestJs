@@ -120,4 +120,34 @@ export interface HttpOptions {
    * @default 'weak'
    */
   etag?: false | 'weak' | 'strong';
+
+  /**
+   * Fast abort mode for bad requests
+   *
+   * When enabled, closes connections immediately for requests that exceed size limits
+   * or have invalid data, without sending HTTP status codes. This is faster but less
+   * user-friendly as clients don't receive proper error responses.
+   *
+   * **Use cases:**
+   * - High-performance APIs where speed is critical
+   * - Internal services where clients can handle abrupt closures
+   * - DDoS protection (quickly drop malicious requests)
+   *
+   * **Trade-offs:**
+   * - Faster: No time spent formatting/sending error responses
+   * - Lower memory: No response buffering for bad requests
+   * - Less user-friendly: Clients see connection errors instead of HTTP status codes
+   * - Harder to debug: No error messages in client logs
+   *
+   * @default false
+   * @example
+   * ```typescript
+   * // Enable for maximum performance
+   * fastAbort: true
+   *
+   * // Disable for better developer experience (default)
+   * fastAbort: false
+   * ```
+   */
+  fastAbort?: boolean;
 }

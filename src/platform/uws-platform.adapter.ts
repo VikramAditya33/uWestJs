@@ -8,6 +8,8 @@ import { UwsAdapter } from '../adapter/uws.adapter';
 import { UwsRequest } from './uws-request';
 import { UwsResponse } from './uws-response';
 import { RouteRegistry } from './route-registry';
+import { CorsHandler } from './cors-handler';
+import { StaticFileHandler } from './static-file-handler';
 import type { PlatformOptions, CorsOptions } from '../interfaces';
 import type { ModuleRef } from '../middleware/module-ref';
 
@@ -82,9 +84,23 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
   private listenSocket?: uWS.us_listen_socket;
   private readonly platformOptions: ResolvedPlatformOptions;
   private readonly routeRegistry: RouteRegistry;
+  private readonly logger: Required<Pick<import('../interfaces').Logger, 'log' | 'debug' | 'warn'>>;
   private versioningWarningShown = false;
   private errorHandlerWarningShown = false;
   private notFoundHandlerWarningShown = false;
+
+  /**
+   * Show a warning message once per warning type
+   * Uses the configured logger for consistency with other framework logging
+   */
+  private warnOnce(
+    flag: 'versioningWarningShown' | 'errorHandlerWarningShown' | 'notFoundHandlerWarningShown',
+    message: string
+  ): void {
+    if (this[flag]) return;
+    this[flag] = true;
+    this.logger.warn(message);
+  }
 
   constructor(options: PlatformOptions = {}) {
     super();
@@ -139,6 +155,13 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
 
     // Create uWS App (HTTP + WebSocket capable)
     this.uwsApp = this.createUwsApp(options);
+
+    // Initialize logger (use provided logger or default to console)
+    this.logger = {
+      log: options.logger?.log?.bind(options.logger) || console.log.bind(console),
+      debug: options.logger?.debug?.bind(options.logger) || console.debug.bind(console),
+      warn: options.logger?.warn?.bind(options.logger) || console.warn.bind(console),
+    };
 
     // Create route registry
     this.routeRegistry = new RouteRegistry(this.uwsApp, this.platformOptions);
@@ -297,7 +320,7 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
    * Get the underlying server instance (alias for getHttpServer)
    */
   getInstance<T = uWS.TemplatedApp>(): T {
-    return this.uwsApp as any;
+    return this.getHttpServer() as T;
   }
 
   // ============================================================================
@@ -305,136 +328,85 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
   // ============================================================================
 
   /**
-   * Register GET route
-   *
-   * @remarks
-   * Supports two signatures:
-   * - `get(path, handler)` - Register route at specific path
-   * - `get(handler)` - Register global middleware (not recommended, use NestJS guards/interceptors instead)
+   * Internal method to handle HTTP method registration with overload support
    */
-  get(path: string, handler: Function): any;
-  get(handler: Function): any;
-  get(...args: any[]): any {
+  private handleMethodRegistration(method: string, ...args: any[]): any {
     if (args.length === 1) {
       // Single argument: global handler (not typically used in NestJS)
       // Return without registering to avoid breaking AbstractHttpAdapter contract
       return;
     }
-    this.registerRoute('get', args[0], args[1]);
+    this.registerRoute(method, args[0], args[1]);
   }
 
-  /**
-   * Register POST route
-   */
+  /** Register GET route */
+  get(path: string, handler: Function): any;
+  get(handler: Function): any;
+  get(...args: any[]): any {
+    return this.handleMethodRegistration('get', ...args);
+  }
+
+  /** Register POST route */
   post(path: string, handler: Function): any;
   post(handler: Function): any;
   post(...args: any[]): any {
-    if (args.length === 1) {
-      return;
-    }
-    this.registerRoute('post', args[0], args[1]);
+    return this.handleMethodRegistration('post', ...args);
   }
 
-  /**
-   * Register PUT route
-   */
+  /** Register PUT route */
   put(path: string, handler: Function): any;
   put(handler: Function): any;
   put(...args: any[]): any {
-    if (args.length === 1) {
-      return;
-    }
-    this.registerRoute('put', args[0], args[1]);
+    return this.handleMethodRegistration('put', ...args);
   }
 
-  /**
-   * Register DELETE route
-   */
+  /** Register DELETE route */
   delete(path: string, handler: Function): any;
   delete(handler: Function): any;
   delete(...args: any[]): any {
-    if (args.length === 1) {
-      return;
-    }
-    this.registerRoute('delete', args[0], args[1]);
+    return this.handleMethodRegistration('delete', ...args);
   }
 
-  /**
-   * Register PATCH route
-   */
+  /** Register PATCH route */
   patch(path: string, handler: Function): any;
   patch(handler: Function): any;
   patch(...args: any[]): any {
-    if (args.length === 1) {
-      return;
-    }
-    this.registerRoute('patch', args[0], args[1]);
+    return this.handleMethodRegistration('patch', ...args);
   }
 
-  /**
-   * Register OPTIONS route
-   */
+  /** Register OPTIONS route */
   options(path: string, handler: Function): any;
   options(handler: Function): any;
   options(...args: any[]): any {
-    if (args.length === 1) {
-      return;
-    }
-    this.registerRoute('options', args[0], args[1]);
+    return this.handleMethodRegistration('options', ...args);
   }
 
-  /**
-   * Register HEAD route
-   */
+  /** Register HEAD route */
   head(path: string, handler: Function): any;
   head(handler: Function): any;
   head(...args: any[]): any {
-    if (args.length === 1) {
-      return;
-    }
-    this.registerRoute('head', args[0], args[1]);
+    return this.handleMethodRegistration('head', ...args);
   }
 
-  /**
-   * Register route for all HTTP methods
-   */
+  /** Register route for all HTTP methods */
   all(path: string, handler: Function): any;
   all(handler: Function): any;
   all(...args: any[]): any {
-    if (args.length === 1) {
-      return;
-    }
-    this.registerRoute('all', args[0], args[1]);
+    return this.handleMethodRegistration('all', ...args);
   }
 
   /**
    * Internal method to register routes with uWS
    */
   private registerRoute(method: string, path: string, handler: Function): void {
-    // Use route registry to handle registration
     this.routeRegistry.register(method.toUpperCase(), path, handler as any);
   }
 
   /**
    * Register a route with metadata (guards, pipes, filters)
    *
-   * This method is used by NestJS to register routes with their associated
-   * middleware metadata (guards, pipes, exception filters). The metadata
-   * is passed to the route registry which executes the middleware pipeline.
-   *
-   * @param method - HTTP method (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD, ALL)
-   * @param path - Route path (NestJS format with :param or :param?)
-   * @param handler - Route handler function
-   * @param metadata - Middleware metadata (guards, pipes, filters)
-   *
-   * @example
-   * ```typescript
-   * adapter.registerRouteWithMetadata('GET', '/users/:id', handler, {
-   *   guards: [AuthGuard],
-   *   pipes: [ValidationPipe],
-   *   filters: [HttpExceptionFilter]
-   * });
-   * ```
+   * Used by NestJS to register routes with their associated middleware metadata.
+   * The metadata is passed to the route registry which executes the middleware pipeline.
    */
   registerRouteWithMetadata(
     method: string,
@@ -446,25 +418,23 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
   }
 
   // ============================================================================
-  // Middleware Registration (Phase 4)
+  // Middleware Registration
   // ============================================================================
 
   /**
-   * Register middleware (not yet implemented)
+   * Register middleware (intentionally not supported)
    *
-   * IMPORTANT: This adapter does not support Express-style middleware.
-   * If you need middleware functionality (helmet, cors, etc.), you have two options:
-   * 1. Use NestJS guards, interceptors, and pipes instead
-   * 2. Wait for Phase 4 middleware implementation
+   * Express-style middleware is not compatible with uWebSockets.js architecture.
+   * Use NestJS guards, interceptors, and pipes instead for request processing.
    *
-   * @throws Error indicating middleware is not supported
+   * @throws Error always - this method is not supported
    */
   use(path: string, handler: (...args: unknown[]) => unknown): void;
   use(handler: (...args: unknown[]) => unknown): void;
   use(..._args: unknown[]): void {
     throw new Error(
       'UwsPlatformAdapter does not support Express-style middleware. ' +
-        'Use NestJS guards, interceptors, and pipes instead, or wait for Phase 4 middleware implementation.'
+        'Use NestJS guards, interceptors, and pipes instead.'
     );
   }
 
@@ -479,7 +449,7 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
     if (statusCode) {
       response.status(statusCode);
     }
-    response.send(body as any);
+    response.send(body as string | Buffer | unknown[] | Record<string, unknown>);
   }
 
   /**
@@ -490,7 +460,12 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
   }
 
   /**
-   * Render view (not implemented - NestJS handles rendering)
+   * Render view (not implemented)
+   *
+   * View rendering is handled by NestJS at a higher level through the
+   * @Render() decorator and view engines. This low-level method is not needed.
+   *
+   * @throws Error always - use NestJS @Render() decorator instead
    */
   render(_response: UwsResponse, _view: string, _options: unknown): void {
     throw new Error('render() not implemented - use NestJS view rendering');
@@ -515,39 +490,67 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
   /**
    * Set error handler (not yet implemented)
    *
-   * Note: NestJS exception filters work at a higher level and are the
-   * recommended way to handle errors. This method is rarely needed.
+   * Custom error handlers at the adapter level are not yet supported.
+   * Use NestJS exception filters (@Catch decorators) which provide more
+   * powerful and flexible error handling capabilities.
+   *
+   * @param _handler - Error handler function (ignored)
    */
   setErrorHandler(_handler: (...args: unknown[]) => unknown): void {
-    if (this.errorHandlerWarningShown) return;
-    this.errorHandlerWarningShown = true;
-
-    console.warn(
-      'UwsPlatformAdapter: setErrorHandler not yet implemented. ' +
-        'Use NestJS exception filters instead (@Catch decorators).'
+    this.warnOnce(
+      'errorHandlerWarningShown',
+      'UwsPlatformAdapter: setErrorHandler not yet implemented. Use NestJS exception filters instead (@Catch decorators).'
     );
   }
 
   /**
    * Set not found handler (not yet implemented)
    *
-   * Note: NestJS handles 404s automatically. This method is rarely needed.
+   * Custom 404 handlers at the adapter level are not yet supported.
+   * NestJS automatically returns 404 responses for unmatched routes.
+   * Use exception filters if you need custom 404 handling.
+   *
+   * @param _handler - Not found handler function (ignored)
    */
   setNotFoundHandler(_handler: (...args: unknown[]) => unknown): void {
-    if (this.notFoundHandlerWarningShown) return;
-    this.notFoundHandlerWarningShown = true;
-
-    console.warn(
-      'UwsPlatformAdapter: setNotFoundHandler not yet implemented. ' +
-        'NestJS handles 404s automatically through its routing system.'
+    this.warnOnce(
+      'notFoundHandlerWarningShown',
+      'UwsPlatformAdapter: setNotFoundHandler not yet implemented. NestJS handles 404s automatically through its routing system.'
     );
   }
 
   /**
-   * Enable CORS (not yet implemented)
+   * Enable CORS for HTTP requests
+   *
+   * Configures Cross-Origin Resource Sharing (CORS) headers for all HTTP requests.
+   * Handles both simple requests and preflight (OPTIONS) requests automatically.
+   *
+   * @param options - CORS configuration options
+   *
+   * @example
+   * ```typescript
+   * // Allow all origins
+   * app.enableCors();
+   *
+   * // Allow specific origin
+   * app.enableCors({ origin: 'https://example.com' });
+   *
+   * // Allow multiple origins
+   * app.enableCors({ origin: ['https://example.com', 'https://app.example.com'] });
+   *
+   * // Dynamic origin validation
+   * app.enableCors({
+   *   origin: (origin) => origin?.endsWith('.example.com') ?? false,
+   *   credentials: true
+   * });
+   * ```
    */
-  enableCors(_options?: unknown): void {
-    // Not yet implemented
+  enableCors(options?: CorsOptions): void {
+    const corsHandler = new CorsHandler(options);
+
+    // Register CORS handler with route registry
+    // This will be called before all route handlers
+    this.routeRegistry.registerCorsHandler(corsHandler);
   }
 
   /**
@@ -637,11 +640,18 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
    * Check if response headers have been sent
    */
   isHeadersSent(response: UwsResponse): boolean {
-    return (response as any).headersSent;
+    return response.headersSent;
   }
 
   /**
-   * Set response status message (not supported by uWS)
+   * Set response status message (not supported)
+   *
+   * uWebSockets.js does not support custom HTTP status messages.
+   * Status messages are automatically determined by the status code
+   * according to HTTP specifications (e.g., 200 -> "OK", 404 -> "Not Found").
+   *
+   * @param _response - Response object (ignored)
+   * @param _message - Status message (ignored)
    */
   setStatusMessage(_response: UwsResponse, _message: string): void {
     // uWS doesn't support custom status messages
@@ -676,28 +686,106 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
   }
 
   /**
-   * Set view engine (not implemented - NestJS handles view rendering)
+   * Set view engine (not needed)
+   *
+   * View engine configuration is handled by NestJS at the application level.
+   * This adapter-level method is not needed for view rendering to work.
+   *
+   * @param _engine - View engine name (ignored)
    */
   setViewEngine(_engine: string): void {
     // No-op - NestJS handles view rendering
   }
 
   /**
-   * Use static assets (not yet implemented)
+   * Use static assets
    *
-   * IMPORTANT: This adapter does not support static file serving yet.
-   * If you need static files, consider:
-   * 1. Using a reverse proxy (nginx, Caddy) to serve static files
-   * 2. Using a CDN for static assets
-   * 3. Waiting for future implementation
+   * Serves static files from the specified directory with caching,
+   * range requests, and security features.
    *
-   * @throws Error indicating static assets are not supported
+   * Registers a catch-all GET route (/*) that serves files from the specified
+   * directory. This route is registered with the lowest priority to ensure
+   * API routes take precedence.
+   *
+   * @param path - Root directory for static files
+   * @param options - Static file serving options
+   *
+   * @example
+   * ```typescript
+   * app.useStaticAssets('public', {
+   *   maxAge: 86400000, // 1 day
+   *   etag: true,
+   *   immutable: true
+   * });
+   * ```
    */
-  useStaticAssets(..._args: unknown[]): void {
-    throw new Error(
-      'UwsPlatformAdapter does not support static file serving yet. ' +
-        'Use a reverse proxy or CDN for static assets.'
-    );
+  useStaticAssets(
+    path: string,
+    options?: Partial<import('./static-file-handler').StaticFileOptions> & {
+      silent?: boolean;
+      prefix?: string;
+    }
+  ): void {
+    // Validate path
+    if (typeof path !== 'string' || path.trim() === '') {
+      throw new Error('Static assets path must be a non-empty string');
+    }
+
+    const { silent, prefix, ...handlerOptions } = options || {};
+
+    const handler = new StaticFileHandler({
+      root: path,
+      ...handlerOptions,
+    });
+
+    if (!silent) {
+      this.logger.log(`Static assets enabled from: ${path}`);
+    }
+
+    // Determine the route pattern based on prefix
+    // Normalize prefix by removing trailing slash
+    let routePattern = '/*';
+    if (prefix) {
+      const normalizedPrefix = prefix.trim().replace(/\/$/, '');
+      if (normalizedPrefix) {
+        routePattern = `${normalizedPrefix}/*`;
+      }
+    }
+
+    // Register a catch-all route handler for static files
+    // This should be registered AFTER all API routes to ensure proper priority
+    // uWS routes are matched in registration order, so registering this last
+    // ensures API routes take precedence
+    const staticAssetHandler = async (req: UwsRequest, res: UwsResponse) => {
+      try {
+        // Extract the file path by removing the prefix if present
+        let filePath = req.path;
+        if (prefix) {
+          const normalizedPrefix = prefix.trim().replace(/\/$/, '');
+          if (normalizedPrefix && filePath.startsWith(normalizedPrefix)) {
+            filePath = filePath.substring(normalizedPrefix.length);
+          }
+        }
+
+        await handler.serve(req, res, filePath);
+      } catch (error) {
+        // Log error for diagnostics (could be file not found or actual error)
+        this.logger.debug(`Static file error for ${req.path}:`, error);
+
+        // If file not found or error, send 404
+        if (!res.headersSent && !res.isAborted) {
+          res.status(404);
+          res.send({
+            statusCode: 404,
+            message: 'Not Found',
+          });
+        }
+      }
+    };
+
+    // Register for both GET and HEAD methods
+    this.get(routePattern, staticAssetHandler as Function);
+    this.head(routePattern, staticAssetHandler as Function);
   }
 
   /**
@@ -708,41 +796,32 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
   }
 
   /**
-   * Apply version filter (required by AbstractHttpAdapter)
+   * Apply version filter (not yet implemented)
    *
-   * @remarks
-   * API versioning is not yet supported in UwsPlatformAdapter.
-   * This method currently bypasses version filtering and returns the handler unchanged.
-   * A warning will be logged once if versioning is attempted.
+   * API versioning is not yet supported. This method bypasses version filtering
+   * and returns the handler unchanged. All route versions will be accessible
+   * regardless of the requested version.
    *
-   * The return type matches AbstractHttpAdapter's signature, but since versioning
-   * is not implemented, the returned function simply calls the original handler.
+   * A warning is logged once when versioning is attempted to inform developers
+   * that version filtering is not active.
    *
-   * @param handler - The route handler function
-   * @param _version - Version information (currently ignored)
-   * @param _versioningOptions - Versioning options (currently ignored)
-   * @returns A middleware-like function that calls the original handler
+   * @param handler - Route handler function
+   * @param _version - Version constraint (ignored)
+   * @param _versioningOptions - Versioning options (ignored)
+   * @returns The original handler unchanged
    */
   applyVersionFilter(
     handler: Function,
     _version: any,
     _versioningOptions: any
   ): (req: any, res: any, next: () => void) => Function {
-    // Warn once if versioning is attempted
-    if (
-      !this.versioningWarningShown &&
-      (_version !== undefined || _versioningOptions !== undefined)
-    ) {
-      this.versioningWarningShown = true;
-      console.warn(
-        '[UwsPlatformAdapter] API versioning is not yet supported. ' +
-          'Version filters have been bypassed. All route versions will be accessible.'
+    if (_version !== undefined || _versioningOptions !== undefined) {
+      this.warnOnce(
+        'versioningWarningShown',
+        '[UwsPlatformAdapter] API versioning is not yet supported. Version filters have been bypassed. All route versions will be accessible.'
       );
     }
-
-    // Return the handler cast to match the expected signature
-    // Since versioning is not implemented, we just return the handler as-is
-    return handler as any;
+    return handler as (req: any, res: any, next: () => void) => Function;
   }
 
   /**

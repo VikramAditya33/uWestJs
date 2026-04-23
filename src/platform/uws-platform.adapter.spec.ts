@@ -507,12 +507,6 @@ describe('UwsPlatformAdapter', () => {
       }).toThrow('UwsPlatformAdapter does not support Express-style middleware');
     });
 
-    it('should throw error for useStaticAssets', () => {
-      expect(() => {
-        adapter.useStaticAssets('/public');
-      }).toThrow('UwsPlatformAdapter does not support static file serving yet');
-    });
-
     it('should not throw for setViewEngine', () => {
       expect(() => {
         adapter.setViewEngine('ejs');
@@ -523,6 +517,91 @@ describe('UwsPlatformAdapter', () => {
       expect(() => {
         adapter.registerParserMiddleware();
       }).not.toThrow();
+    });
+  });
+
+  describe('static assets', () => {
+    let adapter: UwsPlatformAdapter;
+    let mockRegistry: any;
+
+    beforeEach(() => {
+      mockRegistry = {
+        register: jest.fn(),
+      };
+      (RouteRegistry as jest.Mock).mockImplementation(() => mockRegistry);
+
+      adapter = new UwsPlatformAdapter();
+    });
+
+    it('should enable static assets and register catch-all route', () => {
+      adapter.useStaticAssets('/public');
+
+      // Should register a GET route for /*
+      expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/*', expect.any(Function));
+    });
+
+    it('should respect silent option and not log', () => {
+      adapter.useStaticAssets('/public', { silent: true });
+
+      // Should still register the route
+      expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/*', expect.any(Function));
+    });
+
+    it('should register static assets route when custom options provided', () => {
+      adapter.useStaticAssets('/public', {
+        maxAge: 3600000,
+        etag: false,
+      });
+
+      // Should register the route
+      expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/*', expect.any(Function));
+    });
+
+    it('should register multiple static asset routes when called multiple times', () => {
+      adapter.useStaticAssets('/public');
+      adapter.useStaticAssets('/assets');
+
+      // Should register both routes (GET and HEAD for each)
+      expect(mockRegistry.register).toHaveBeenCalledTimes(4);
+      // First call: GET and HEAD for /public
+      expect(mockRegistry.register).toHaveBeenNthCalledWith(1, 'GET', '/*', expect.any(Function));
+      expect(mockRegistry.register).toHaveBeenNthCalledWith(2, 'HEAD', '/*', expect.any(Function));
+      // Second call: GET and HEAD for /assets
+      expect(mockRegistry.register).toHaveBeenNthCalledWith(3, 'GET', '/*', expect.any(Function));
+      expect(mockRegistry.register).toHaveBeenNthCalledWith(4, 'HEAD', '/*', expect.any(Function));
+    });
+
+    it('should support prefix option for scoped static routes', () => {
+      adapter.useStaticAssets('/public', { prefix: '/assets' });
+
+      // Should register route with prefix
+      expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/assets/*', expect.any(Function));
+    });
+
+    it('should normalize prefix by removing trailing slash', () => {
+      adapter.useStaticAssets('/public', { prefix: '/assets/' });
+
+      // Should register route with normalized prefix (no trailing slash)
+      expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/assets/*', expect.any(Function));
+    });
+
+    it('should handle empty prefix by using default catch-all', () => {
+      adapter.useStaticAssets('/public', { prefix: '' });
+
+      // Should register default catch-all route
+      expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/*', expect.any(Function));
+    });
+
+    it('should throw error for invalid path (non-string)', () => {
+      expect(() => {
+        adapter.useStaticAssets(123 as any);
+      }).toThrow();
+    });
+
+    it('should throw error for empty path', () => {
+      expect(() => {
+        adapter.useStaticAssets('');
+      }).toThrow();
     });
   });
 

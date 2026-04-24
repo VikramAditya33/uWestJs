@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="uWestJS.png" alt="uWestJS Logo" width="400"/>
+  <img src="assets/uWestJS.png" alt="uWestJS Logo" width="400"/>
 </p>
 
 # uWestJS

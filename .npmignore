@@ -1,8 +1,7 @@
 # Source files
 src/
-*.spec.ts
-*.test.ts
 **/__mocks__/
+**/test-helpers.ts
 
 # Config files
 tsconfig.json

@@ -3,27 +3,13 @@
  * @packageDocumentation
  */
 
-// Core adapter
-export { UwsAdapter } from './adapter/uws.adapter';
+// Shared (DI and interfaces)
+export * from './shared';
 
-// Decorators
-export * from './decorators';
+// HTTP Platform
+export * from './http';
 
-// Middleware
-export { UseGuards } from './middleware/guards';
-export { UsePipes } from './middleware/pipes';
-export { UseFilters } from './middleware/filters';
-
-// Exceptions
-export * from './exceptions';
-
-// Interfaces
-export * from './interfaces';
-
-// Socket wrapper
-export { UwsSocketImpl } from './socket/uws-socket';
-
-// Router (for advanced usage)
-export { MessageRouter, MetadataScanner, HandlerExecutor } from './router';
+// WebSocket
+export * from './websocket';
 
 // Note: Testing utilities will be exported from 'uwestjs/testing' in Phase 4

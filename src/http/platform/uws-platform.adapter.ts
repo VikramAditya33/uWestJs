@@ -35,9 +35,9 @@ type ResolvedPlatformOptions = {
   port: number;
   maxPayloadLength: number;
   idleTimeout: number;
+  maxLifetime: number;
   compression: uWS.CompressOptions;
   path: string;
-  perMessageDeflate: boolean;
   maxBackpressure: number;
   closeOnBackpressureLimit: boolean;
   sendPingsAutomatically: boolean;
@@ -132,9 +132,9 @@ export class UwsPlatformAdapter extends AbstractHttpAdapter {
       // WebSocket defaults (from v1.x)
       port: 8099,
       cors: undefined,
-      perMessageDeflate: false,
       maxPayloadLength: 16 * 1024,
       idleTimeout: 120,
+      maxLifetime: 0, // 0 = disabled (no lifetime limit)
       maxBackpressure: 1024 * 1024,
       closeOnBackpressureLimit: false,
       sendPingsAutomatically: true,

@@ -257,6 +257,14 @@ export class RouteRegistry {
           const requestPath = uwsReq.getUrl();
           const routesForWildcard = this.complexRoutesByWildcard.get(wildcardKey) || [];
 
+          // Create response wrapper early to attach abort handler
+          const res = new UwsResponse(uwsRes);
+
+          // Attach abort handler immediately to satisfy uWS requirement
+          res._onAbort(() => {
+            // Connection was aborted, nothing to do
+          });
+
           // Try to find a matching route
           let matched = false;
           for (const routeInfo of routesForWildcard) {
@@ -265,9 +273,8 @@ export class RouteRegistry {
             if (matches) {
               matched = true;
 
-              // Create request/response wrappers
+              // Create request wrapper
               const req = new UwsRequest(uwsReq, uwsRes, []);
-              const res = new UwsResponse(uwsRes);
 
               // Set extracted parameters using proper API
               req._setParams(matches);
@@ -290,7 +297,6 @@ export class RouteRegistry {
           // If no route matched, send 404
           if (!matched) {
             const req = new UwsRequest(uwsReq, uwsRes, []);
-            const res = new UwsResponse(uwsRes);
 
             // Handle CORS for unmatched routes (including preflight)
             if (this.corsHandler && (await this.corsHandler.handle(req, res))) {
@@ -343,10 +349,17 @@ export class RouteRegistry {
           const req = new UwsRequest(uwsReq, uwsRes, paramNames);
           const res = new UwsResponse(uwsRes);
 
+          // Attach abort handler immediately to satisfy uWS requirement
+          // This must be done before any async operations
+          res._onAbort(() => {
+            // Connection was aborted, nothing to do
+          });
+
           // Initialize body parser with configured size limit and fast abort option
           req._initBodyParser(
             this.options.maxBodySize ?? 1024 * 1024,
-            this.options.fastAbort ?? false
+            this.options.fastAbort ?? false,
+            res
           );
 
           // Execute handler with error handling
@@ -877,6 +890,11 @@ export class RouteRegistry {
       this.uwsApp.options('/*', async (uwsRes: uWS.HttpResponse, uwsReq: uWS.HttpRequest) => {
         const req = new UwsRequest(uwsReq, uwsRes, []);
         const res = new UwsResponse(uwsRes);
+
+        // Attach abort handler immediately to satisfy uWS requirement
+        res._onAbort(() => {
+          // Connection was aborted, nothing to do
+        });
 
         // Use this.corsHandler to pick up the latest handler
         if (this.corsHandler && (await this.corsHandler.handle(req, res))) {

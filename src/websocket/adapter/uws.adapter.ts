@@ -122,9 +122,13 @@ export class UwsAdapter implements WebSocketAdapter {
     this.options = {
       maxPayloadLength: options?.maxPayloadLength ?? 16 * 1024,
       idleTimeout: options?.idleTimeout ?? 60,
+      maxLifetime: options?.maxLifetime ?? 0, // 0 = disabled (no lifetime limit)
       compression: options?.compression ?? uWS.SHARED_COMPRESSOR,
       port: options?.port ?? 8099, // Default to 8099 if not provided
       path: options?.path ?? '/*',
+      maxBackpressure: options?.maxBackpressure ?? 1024 * 1024, // 1MB default
+      closeOnBackpressureLimit: options?.closeOnBackpressureLimit ?? false,
+      sendPingsAutomatically: options?.sendPingsAutomatically ?? true,
       cors: options?.cors,
       // SSL/TLS fields - carried through as-is (undefined when not supplied)
       cert_file_name: options?.cert_file_name,
@@ -233,6 +237,10 @@ export class UwsAdapter implements WebSocketAdapter {
         compression: this.options.compression,
         maxPayloadLength: this.options.maxPayloadLength,
         idleTimeout: this.options.idleTimeout,
+        maxLifetime: this.options.maxLifetime,
+        maxBackpressure: this.options.maxBackpressure,
+        closeOnBackpressureLimit: this.options.closeOnBackpressureLimit,
+        sendPingsAutomatically: this.options.sendPingsAutomatically,
 
         open: (ws: uWS.WebSocket<WebSocketClient>) => {
           const extWs = ws as ExtendedWebSocket;

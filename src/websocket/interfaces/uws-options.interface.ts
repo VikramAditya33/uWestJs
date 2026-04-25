@@ -25,8 +25,53 @@ export interface UwsAdapterOptions {
   idleTimeout?: number;
 
   /**
+   * Maximum connection lifetime in minutes
+   *
+   * Maximum number of minutes a WebSocket connection may remain open before
+   * being automatically closed by the server. Set to 0 to disable this feature.
+   *
+   * This is useful for:
+   * - Forcing clients to reconnect periodically (load balancing)
+   * - Preventing indefinitely long connections
+   * - Ensuring clients get updated connection parameters
+   *
+   * @default 0 (disabled)
+   * @example
+   * ```typescript
+   * // Close connections after 24 hours
+   * maxLifetime: 24 * 60  // 1440 minutes
+   *
+   * // Close connections after 1 hour
+   * maxLifetime: 60
+   *
+   * // Disable (allow indefinite connections)
+   * maxLifetime: 0
+   * ```
+   */
+  maxLifetime?: number;
+
+  /**
    * Compression mode
+   *
+   * Controls per-message deflate compression for WebSocket messages.
+   *
+   * Options:
+   * - `uWS.DISABLED` - No compression (lowest CPU, highest bandwidth)
+   * - `uWS.SHARED_COMPRESSOR` - Shared compressor across connections (balanced)
+   * - `uWS.DEDICATED_COMPRESSOR_3KB` to `_256KB` - Dedicated per-connection (highest compression)
+   *
    * @default uWS.SHARED_COMPRESSOR
+   * @example
+   * ```typescript
+   * // Disable compression for low-latency requirements
+   * compression: uWS.DISABLED
+   *
+   * // Enable shared compression (default, recommended)
+   * compression: uWS.SHARED_COMPRESSOR
+   *
+   * // Maximum compression for bandwidth-constrained environments
+   * compression: uWS.DEDICATED_COMPRESSOR_256KB
+   * ```
    */
   compression?: uWS.CompressOptions;
 
@@ -35,6 +80,64 @@ export interface UwsAdapterOptions {
    * @default '/*'
    */
   path?: string;
+
+  /**
+   * Maximum backpressure (buffered bytes) per WebSocket connection
+   *
+   * When a client is slow to receive data, messages are buffered. If the buffer exceeds this limit:
+   * - If `closeOnBackpressureLimit` is true: connection is closed
+   * - If `closeOnBackpressureLimit` is false: messages continue to buffer (may cause memory issues)
+   *
+   * @default 1048576 (1MB)
+   * @example
+   * ```typescript
+   * // Allow 5MB of buffered data per connection
+   * maxBackpressure: 5 * 1024 * 1024
+   *
+   * // Strict limit for memory-constrained environments
+   * maxBackpressure: 512 * 1024  // 512KB
+   * ```
+   */
+  maxBackpressure?: number;
+
+  /**
+   * Close connection when backpressure limit is exceeded
+   *
+   * When true, connections that exceed `maxBackpressure` are automatically closed.
+   * When false, messages continue to buffer (may cause memory issues with slow clients).
+   *
+   * @default false
+   * @example
+   * ```typescript
+   * // Protect server from slow clients
+   * maxBackpressure: 1024 * 1024,
+   * closeOnBackpressureLimit: true
+   *
+   * // Allow unlimited buffering (use with caution)
+   * closeOnBackpressureLimit: false
+   * ```
+   */
+  closeOnBackpressureLimit?: boolean;
+
+  /**
+   * Automatically send ping frames to keep connections alive
+   *
+   * When enabled, the server automatically sends WebSocket ping frames to detect
+   * dead connections. Clients must respond with pong frames or the connection
+   * will be closed after `idleTimeout` seconds.
+   *
+   * @default true
+   * @example
+   * ```typescript
+   * // Enable automatic pings (recommended)
+   * sendPingsAutomatically: true,
+   * idleTimeout: 120  // Close if no pong received within 120s
+   *
+   * // Disable if client handles pings manually
+   * sendPingsAutomatically: false
+   * ```
+   */
+  sendPingsAutomatically?: boolean;
 
   /**
    * CORS configuration
@@ -160,6 +263,11 @@ export interface ResolvedUwsAdapterOptions {
   idleTimeout: number;
 
   /**
+   * Maximum connection lifetime in minutes
+   */
+  maxLifetime: number;
+
+  /**
    * Compression mode
    */
   compression: uWS.CompressOptions;
@@ -168,6 +276,21 @@ export interface ResolvedUwsAdapterOptions {
    * WebSocket endpoint path
    */
   path: string;
+
+  /**
+   * Maximum backpressure (buffered bytes) per WebSocket connection
+   */
+  maxBackpressure: number;
+
+  /**
+   * Close connection when backpressure limit is exceeded
+   */
+  closeOnBackpressureLimit: boolean;
+
+  /**
+   * Automatically send ping frames to keep connections alive
+   */
+  sendPingsAutomatically: boolean;
 
   /**
    * CORS configuration

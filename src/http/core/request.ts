@@ -1055,8 +1055,15 @@ export class UwsRequest extends Readable {
    * Uses buffering mode for efficiency.
    * Caches the parsed result for subsequent calls.
    *
+   * For requests with empty bodies:
+   * - GET/HEAD/DELETE: Returns a frozen empty object `Object.freeze({})`
+   * - Other methods: Throws an error
+   *
+   * Note: The frozen empty object prevents accidental mutations and will throw
+   * a TypeError in strict mode if mutation is attempted.
+   *
    * @returns Promise that resolves with the parsed JSON object
-   * @throws Error if body is not valid JSON
+   * @throws Error if body is not valid JSON or if body is empty for non-GET/HEAD/DELETE methods
    */
   async json<T = unknown>(): Promise<T> {
     // Return cached result if available
@@ -1071,7 +1078,21 @@ export class UwsRequest extends Readable {
 
     // Create and cache the promise (buffer() handles mode switching)
     this.jsonPromise = this.buffer().then((buffer) => {
-      const text = buffer.toString('utf-8');
+      const text = buffer.toString('utf-8').trim();
+
+      // Handle empty body - return frozen empty object for GET/HEAD/DELETE, throw for all other methods
+      if (text === '') {
+        if (this.method === 'GET' || this.method === 'HEAD' || this.method === 'DELETE') {
+          // Freeze the empty object to prevent accidental mutations
+          // This will throw TypeError in strict mode if mutation is attempted
+          this.cachedJson = Object.freeze({}) as T;
+          return this.cachedJson as T;
+        }
+        // Throw for POST/PUT/PATCH and other methods (OPTIONS, SEARCH, PROPFIND, etc.)
+        throw new Error('Invalid JSON: Request body is empty', {
+          cause: new SyntaxError('Unexpected end of JSON input'),
+        });
+      }
 
       try {
         this.cachedJson = JSON.parse(text);

@@ -78,6 +78,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exception handling with WsException class
 - Broadcast operator with room targeting and client exclusion
 
-[Unreleased]: https://github.com/VikramAditya33/uWestJs/compare/v1.0.1...HEAD
-[1.0.1]: https://github.com/VikramAditya33/uWestJs/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/VikramAditya33/uWestJs/releases/tag/v1.0.0
+[Unreleased]: https://github.com/FOSSFORGE/uWestJS/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/FOSSFORGE/uWestJS/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/FOSSFORGE/uWestJS/releases/tag/v1.0.0

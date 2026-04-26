@@ -1,7 +1,7 @@
 {
   "name": "uwestjs",
   "version": "1.0.1",
-  "description": "High-performance WebSocket adapter for NestJS using uWebSockets.js",
+  "description": "High-performance HTTP and WebSocket platform adapter for NestJS using uWebSockets.js",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -44,12 +44,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/VikramAditya33/uWestJs.git"
+    "url": "https://github.com/FOSSFORGE/uWestJS.git"
   },
   "bugs": {
-    "url": "https://github.com/VikramAditya33/uWestJs/issues"
+    "url": "https://github.com/FOSSFORGE/uWestJS/issues"
   },
-  "homepage": "https://github.com/VikramAditya33/uWestJs#readme",
+  "homepage": "https://github.com/FOSSFORGE/uWestJS#readme",
   "publishConfig": {
     "access": "public"
   },

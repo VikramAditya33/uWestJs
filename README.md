@@ -4,11 +4,11 @@
 
 # uWestJS
 
-> High-performance HTTP and WebSocket platform for NestJS using uWebSockets.js
+> High-performance HTTP and WebSocket platform adapter for NestJS using uWebSockets.js
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-20%20%7C%2022%20%7C%2024%20%7C%2025-brightgreen)](https://nodejs.org)
-[![CodeFactor](https://www.codefactor.io/repository/github/vikramaditya33/uwestjs/badge)](https://www.codefactor.io/repository/github/vikramaditya33/uwestjs)
+[![CodeFactor](https://www.codefactor.io/repository/github/fossforge/uwestjs/badge)](https://www.codefactor.io/repository/github/fossforge/uwestjs)
 
 uWestJS is a high-performance platform adapter for NestJS, powered by [uWebSockets.js](https://github.com/uNetworking/uWebSockets.js). It provides both HTTP and WebSocket capabilities with significantly better performance while maintaining full compatibility with NestJS decorators and patterns you already know.
 
@@ -354,16 +354,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- GitHub Issues: [Report a bug](https://github.com/VikramAditya33/uWestJs/issues)
-- GitHub Discussions: [Ask questions](https://github.com/VikramAditya33/uWestJs/discussions)
+- GitHub Issues: [Report a bug](https://github.com/FOSSFORGE/uWestJS/issues)
+- GitHub Discussions: [Ask questions](https://github.com/FOSSFORGE/uWestJS/discussions)
 
 ## Author
 
 Vikram Aditya
 
+## Organization
+
+Part of [FOSS FORGE](https://github.com/FOSSFORGE) - Open Source Tools & Libraries
+
 ## Links
 
-- [GitHub Repository](https://github.com/VikramAditya33/uWestJs)
+- [GitHub Repository](https://github.com/FOSSFORGE/uWestJS)
 - [npm Package](https://www.npmjs.com/package/uwestjs)
 - [NestJS Documentation](https://docs.nestjs.com/websockets/gateways)
 - [uWebSockets.js](https://github.com/uNetworking/uWebSockets.js)

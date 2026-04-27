@@ -7,11 +7,13 @@ on:
       - 'src/**'
       - 'benchmarks/**'
       - 'package.json'
+      - '.github/workflows/benchmark.yml'
   push:
     branches: [main]
     paths:
       - 'src/**'
       - 'benchmarks/**'
+      - '.github/workflows/benchmark.yml'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +25,8 @@ jobs:
   benchmark:
     name: Run Performance Benchmarks
     runs-on: ubuntu-latest
+    # Skip benchmarks for Dependabot PRs
+    if: github.actor != 'dependabot[bot]'
     
     steps:
       - name: Checkout code

@@ -16,6 +16,13 @@ import { MultipartFormHandler } from '../body/multipart-handler';
 const BUFFER_WATERMARK = 128 * 1024; // 128KB
 
 /**
+ * This is a single shared constant which will be used inside the request class
+ * The object is created and frozen exactly once when the file is first loaded. Subsequent requests just point to this same memory address.
+ * Since no new objects are being created in that branch, the Garbage Collector has nothing to clean up, which improves the overall latency of the server.
+ */
+const EMPTY_FROZEN_OBJECT = Object.freeze({});
+
+/**
  * Headers that should NOT be duplicated per HTTP spec
  * @see https://www.rfc-editor.org/rfc/rfc7230#section-3.2.2
  */
@@ -1083,9 +1090,9 @@ export class UwsRequest extends Readable {
       // Handle empty body - return frozen empty object for GET/HEAD/DELETE, throw for all other methods
       if (text === '') {
         if (this.method === 'GET' || this.method === 'HEAD' || this.method === 'DELETE') {
-          // Freeze the empty object to prevent accidental mutations
+          // Use the shared constant to freeze the empty object instead of creating a new one
           // This will throw TypeError in strict mode if mutation is attempted
-          this.cachedJson = Object.freeze({}) as T;
+          this.cachedJson = EMPTY_FROZEN_OBJECT as T;
           return this.cachedJson as T;
         }
         // Throw for POST/PUT/PATCH and other methods (OPTIONS, SEARCH, PROPFIND, etc.)

@@ -342,6 +342,53 @@ npm run test:cov
 npm run test:watch
 ```
 
+## Benchmarks
+
+uWestJS delivers exceptional performance compared to traditional Node.js frameworks:
+
+| Scenario | Express | Fastify | uWestJS | vs Express | vs Fastify |
+|----------|---------|---------|---------|------------|------------|
+| headers | 9.55k req/s | 8.85k req/s | **18.42k req/s** | **1.93x faster** | **2.08x faster** |
+| hello-world | 10.58k req/s | 12.83k req/s | **22.77k req/s** | **2.15x faster** | **1.77x faster** |
+| json-response | 10.18k req/s | 9.48k req/s | **18.75k req/s** | **1.84x faster** | **1.98x faster** |
+| mixed-response | 9.60k req/s | 8.01k req/s | **24.62k req/s** | **2.57x faster** | **3.07x faster** |
+| post-json | 10.60k req/s | 12.70k req/s | **45.38k req/s** | **4.28x faster** | **3.57x faster** |
+| query-params | 9.08k req/s | 12.45k req/s | **19.88k req/s** | **2.19x faster** | **1.60x faster** |
+| route-params | 10.67k req/s | 12.04k req/s | **18.77k req/s** | **1.76x faster** | **1.56x faster** |
+| static-file | 10.42k req/s | 12.96k req/s | **21.39k req/s** | **2.05x faster** | **1.65x faster** |
+
+**Average improvement: 1.56x-4.28x faster** across all scenarios.
+
+**Test Environment:**
+- CPU: AMD Ryzen 7 7730U (2.00 GHz, 8 cores)
+- RAM: 16 GB
+- OS: Windows 11 with WSL2 (Ubuntu)
+- Node.js: v24.x
+- Duration: 20s per scenario
+
+Run benchmarks yourself:
+
+```bash
+# Quick benchmark (10s per scenario)
+npm run benchmark:quick
+
+# Full benchmark (20s per scenario, saves results)
+npm run benchmark
+
+# Test benchmark setup
+npm run benchmark:test
+```
+
+Or from the benchmarks directory:
+
+```bash
+cd benchmarks
+npm install
+npm run benchmark:quick
+```
+
+See [benchmarks/README.md](benchmarks/README.md) for detailed information about metrics collected, historical tracking, and CI/CD integration.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

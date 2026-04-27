@@ -16,11 +16,32 @@ const sharedRules = {
 export default [
   // Ignore patterns
   {
-    ignores: ['dist/', 'node_modules/', 'coverage/', '*.js', '*.mjs'],
+    ignores: ['dist/', 'node_modules/', 'coverage/', '*.config.js', '*.config.mjs', 'benchmarks/node_modules/'],
   },
 
   // Base ESLint recommended rules
   eslint.configs.recommended,
+
+  // JavaScript benchmark files configuration
+  {
+    files: ['benchmarks/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: {
+        ...globals.node,
+      },
+    },
+    plugins: {
+      prettier: prettier,
+    },
+    rules: {
+      ...prettierConfig.rules,
+      'prettier/prettier': 'error',
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      'no-console': 'off',
+    },
+  },
 
   // TypeScript source files configuration (with type checking)
   {

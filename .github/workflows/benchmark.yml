@@ -1,0 +1,145 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'benchmarks/**'
+      - 'package.json'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'benchmarks/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write # For committing benchmark history
+  pull-requests: write # For commenting on PRs
+  issues: write # For commit comments via issues API
+
+jobs:
+  benchmark:
+    name: Run Performance Benchmarks
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      
+      - name: Cache Node.js dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            benchmarks/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: 'package.json'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build project
+        run: npm run build
+      
+      - name: Install benchmark dependencies
+        working-directory: ./benchmarks
+        run: npm ci
+      
+      - name: Install wrk
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wrk
+      
+      - name: Run HTTP benchmarks
+        working-directory: ./benchmarks
+        run: node run.js --duration 15 --output results.md
+      
+      - name: Save benchmark history
+        working-directory: ./benchmarks
+        run: npm run benchmark:save
+        continue-on-error: true
+      
+      - name: Compare with history
+        id: compare-history
+        working-directory: ./benchmarks
+        run: npm run benchmark:compare
+        continue-on-error: true
+      
+      - name: Commit history (main branch only)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add benchmarks/history/
+          git diff --staged --quiet || git commit -m "chore: update benchmark history [skip ci]"
+          git pull --rebase --autostash origin ${{ github.ref_name }}
+          git push
+        continue-on-error: true
+      
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-results
+          path: benchmarks/results.md
+          retention-days: 30
+      
+      - name: Comment on commit
+        if: github.event_name == 'push'
+        continue-on-error: true
+        uses: peter-evans/commit-comment@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body-path: benchmarks/results.md
+      
+      - name: Comment on pull request
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- benchmark-results -->';
+            let body = fs.readFileSync('benchmarks/results.md', 'utf8');
+            
+            // Ensure marker is present for comment matching
+            if (!body.includes(marker)) {
+              body = marker + '\n' + body;
+            }
+            
+            const issue_number = context.payload.pull_request.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number
+            });
+
+            const existing = comments.find((comment) =>
+              comment.user && comment.user.type === 'Bot' && comment.body && comment.body.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body
+              });
+            }

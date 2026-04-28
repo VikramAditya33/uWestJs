@@ -206,14 +206,14 @@ See [Server Documentation](./docs/http/Server.md) for all configuration options.
 Configure the WebSocket adapter with compression, timeouts, CORS, and more:
 
 ```typescript
-import * as uWS from 'uWebSockets.js';
+import { SHARED_COMPRESSOR } from 'uwestjs';
 
 const adapter = new UwsAdapter(app, {
   port: 8099,
   path: '/ws',
   maxPayloadLength: 16384,
   idleTimeout: 60,
-  compression: uWS.SHARED_COMPRESSOR,
+  compression: SHARED_COMPRESSOR,
   cors: {
     origin: 'https://example.com',
     credentials: true,
@@ -244,7 +244,7 @@ import { ModuleRef } from '@nestjs/core';
 const moduleRef = app.get(ModuleRef);
 const adapter = new UwsAdapter(app, {
   port: 8099,
-  moduleRef,
+  moduleRef, // Auto-wrapped internally
 });
 ```
 

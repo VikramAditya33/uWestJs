@@ -19,6 +19,9 @@ export * from './adapter';
 // Exceptions
 export * from './exceptions';
 
+// Constants (compression modes)
+export * from './constants';
+
 // Interfaces (types only, BroadcastOperator class takes precedence)
 export type {
   UwsSocket,

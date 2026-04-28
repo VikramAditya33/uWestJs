@@ -144,23 +144,23 @@ compression?: uWS.CompressOptions
 
 Compression mode for WebSocket messages.
 
-**Default:** `uWS.SHARED_COMPRESSOR`
+**Default:** `SHARED_COMPRESSOR`
 
 **Options:**
-- `uWS.DISABLED` - No compression
-- `uWS.SHARED_COMPRESSOR` - Shared compressor (recommended)
-- `uWS.DEDICATED_COMPRESSOR` - Dedicated compressor per connection
+- `DISABLED` - No compression
+- `SHARED_COMPRESSOR` - Shared compressor (recommended)
+- `DEDICATED_COMPRESSOR_3KB` to `DEDICATED_COMPRESSOR_256KB` - Various dedicated compressor sizes
 
 **Example:**
 
 ```typescript
-import * as uWS from 'uWebSockets.js';
+import { UwsAdapter, DISABLED, DEDICATED_COMPRESSOR_3KB } from 'uwestjs';
 
 // Disable compression
-new UwsAdapter(app, { compression: uWS.DISABLED });
+new UwsAdapter(app, { compression: DISABLED });
 
 // Use dedicated compressor (higher memory, better compression)
-new UwsAdapter(app, { compression: uWS.DEDICATED_COMPRESSOR });
+new UwsAdapter(app, { compression: DEDICATED_COMPRESSOR_3KB });
 ```
 
 ### path
@@ -298,10 +298,12 @@ See [CORS Options](#cors-options) for detailed configuration.
 ### moduleRef
 
 ```typescript
-moduleRef?: ModuleRef
+moduleRef?: ModuleRef | NestModuleRef
 ```
 
 Module reference for dependency injection support. When provided, enables DI for guards, pipes, and filters.
+
+Accepts either the NestJS `ModuleRef` (auto-wrapped) or our `ModuleRef` interface.
 
 **Important:** Without `moduleRef`, guards/pipes/filters are instantiated directly and cannot have constructor dependencies.
 
@@ -315,7 +317,7 @@ const moduleRef = app.get(ModuleRef);
 
 const adapter = new UwsAdapter(app, {
   port: 8099,
-  moduleRef, // Enable DI support
+  moduleRef, // Auto-wrapped internally
 });
 
 // Now guards can inject services
@@ -402,9 +404,9 @@ Provide an existing uWebSockets.js app instance for HTTP + WebSocket integration
 **Example:**
 
 ```typescript
-import * as uWS from 'uWebSockets.js';
+import { App } from 'uwestjs';
 
-const uwsApp = uWS.App();
+const uwsApp = App();
 
 // HTTP adapter
 const httpAdapter = new UwsPlatformAdapter(uwsApp);
@@ -736,12 +738,10 @@ Starting from v2.0.0, you can share a single uWebSockets.js instance between HTT
 
 ```typescript
 import { NestFactory } from '@nestjs/core';
-import { UwsPlatformAdapter } from 'uwestjs';
-import { UwsAdapter } from 'uwestjs';
-import * as uWS from 'uWebSockets.js';
+import { UwsPlatformAdapter, UwsAdapter, App } from 'uwestjs';
 
 // Create shared uWS instance
-const uwsApp = uWS.App();
+const uwsApp = App();
 
 // HTTP adapter
 const httpAdapter = new UwsPlatformAdapter(uwsApp);
@@ -812,10 +812,12 @@ const adapter = new UwsAdapter(app, {
 ### With Dependency Injection
 
 ```typescript
+import { ModuleRef } from '@nestjs/core';
+
 const moduleRef = app.get(ModuleRef);
 const adapter = new UwsAdapter(app, {
   port: 8099,
-  moduleRef, // Enable DI for guards/pipes/filters
+  moduleRef, // Auto-wrapped internally
 });
 ```
 
@@ -824,8 +826,7 @@ const adapter = new UwsAdapter(app, {
 ```typescript
 import { NestFactory } from '@nestjs/core';
 import { ModuleRef } from '@nestjs/core';
-import { UwsAdapter } from 'uwestjs';
-import * as uWS from 'uWebSockets.js';
+import { UwsAdapter, SHARED_COMPRESSOR } from 'uwestjs';
 
 const app = await NestFactory.create(AppModule);
 const moduleRef = app.get(ModuleRef);
@@ -838,7 +839,7 @@ const adapter = new UwsAdapter(app, {
   // Performance tuning
   maxPayloadLength: 1024 * 1024, // 1MB
   idleTimeout: 300, // 5 minutes
-  compression: uWS.SHARED_COMPRESSOR,
+  compression: SHARED_COMPRESSOR,
   
   // CORS configuration
   cors: {
@@ -849,7 +850,7 @@ const adapter = new UwsAdapter(app, {
     maxAge: 3600,
   },
   
-  // Enable DI for guards/pipes/filters
+  // Enable DI for guards/pipes/filters (auto-wrapped)
   moduleRef,
 });
 

@@ -110,8 +110,13 @@ export class WsJwtGuard implements CanActivate {
 }
 
 // Enable DI in main.ts
+import { ModuleRef } from '@nestjs/core';
+
 const moduleRef = app.get(ModuleRef);
-const adapter = new UwsAdapter(app, { port: 8099, moduleRef });
+const adapter = new UwsAdapter(app, { 
+  port: 8099, 
+  moduleRef // Auto-wrapped internally
+});
 ```
 
 ### Async Guards

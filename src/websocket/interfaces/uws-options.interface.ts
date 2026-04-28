@@ -1,5 +1,6 @@
 import * as uWS from 'uWebSockets.js';
 import { ModuleRef } from '../../shared/di';
+import { ModuleRef as NestModuleRef } from '@nestjs/core';
 import { CorsOptions } from '../../shared/interfaces';
 
 /**
@@ -152,20 +153,28 @@ export interface UwsAdapterOptions {
    * (e.g., ConfigService, JwtService) that will be resolved from the
    * NestJS DI container.
    *
+   * Accepts either:
+   * - NestJS ModuleRef (from `@nestjs/core`) - will be auto-wrapped
+   * - Our ModuleRef interface (e.g., `NestJsModuleRef.create(nestModuleRef)`)
+   *
    * Without this, guards/pipes/filters are instantiated directly and
    * cannot have constructor dependencies.
    *
    * @example
    * ```typescript
+   * import { ModuleRef } from '@nestjs/core';
+   *
    * const app = await NestFactory.create(AppModule);
    * const moduleRef = app.get(ModuleRef);
+   *
+   * // Simple usage - pass NestJS ModuleRef directly (auto-wrapped)
    * app.useWebSocketAdapter(new UwsAdapter(app, {
    *   port: 8099,
-   *   moduleRef, // Enable DI for guards/pipes/filters
+   *   moduleRef, // Auto-wrapped internally
    * }));
    * ```
    */
-  moduleRef?: ModuleRef;
+  moduleRef?: ModuleRef | NestModuleRef;
 
   /**
    * Existing uWS App instance to use

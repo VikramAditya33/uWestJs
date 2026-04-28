@@ -109,4 +109,35 @@ describe('UwsAdapter', () => {
       expect(() => adapter.setWebSocketHandler(handler)).not.toThrow();
     });
   });
+
+  describe('ModuleRef handling', () => {
+    it.each([
+      {
+        description: 'auto-wrap NestJS ModuleRef',
+        moduleRef: { get: jest.fn((type) => new type()) }, // No 'instances' property
+      },
+      {
+        description: 'accept already-wrapped ModuleRef',
+        moduleRef: { get: jest.fn((type) => new type()), instances: new Map() },
+      },
+      {
+        description: 'use DefaultModuleRef when none provided',
+        moduleRef: undefined,
+      },
+      {
+        description: 'handle null moduleRef',
+        moduleRef: null,
+      },
+    ])('should $description', ({ moduleRef }) => {
+      const testAdapter = new UwsAdapter(null, {
+        port: 8099,
+        moduleRef: moduleRef as any,
+      });
+
+      expect(testAdapter).toBeDefined();
+      expect(() => testAdapter.dispose()).not.toThrow();
+
+      testAdapter.dispose();
+    });
+  });
 });

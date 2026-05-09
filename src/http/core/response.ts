@@ -78,6 +78,10 @@ export class UwsResponse extends Writable {
   // Stored when _final() is called and invoked when response truly finishes
   private pendingFinalCallback?: (error?: Error | null) => void;
 
+  // Content-Length total for piping with known size
+  // When set, _write() uses tryEnd() instead of write() for valid HTTP/1.1
+  private contentLengthTotal?: number;
+
   // Abort callbacks for multiplexing
   private abortCallbacks: Array<() => void> = [];
   private abortHandlerRegistered = false;
@@ -195,13 +199,17 @@ export class UwsResponse extends Writable {
     encoding: BufferEncoding, // eslint-disable-line no-undef -- BufferEncoding is a TypeScript global type from @types/node
     callback: (error?: Error | null) => void
   ): void {
-    // Convert to Buffer if needed
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
-
-    // Delegate to platform-specific streaming with backpressure handling
-    this.streamChunk(buffer)
-      .then(() => callback())
-      .catch((error) => callback(error));
+    if (this.contentLengthTotal !== undefined) {
+      // Content-Length mode: use tryEnd() for each chunk (no batching)
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
+      this.streamChunk(buffer, this.contentLengthTotal)
+        .then(() => callback())
+        .catch((error) => callback(error));
+    } else {
+      // Chunked mode: use writeChunk() batching for fewer syscalls
+      this.writeChunk(chunk, encoding);
+      callback();
+    }
   }
 
   /**
@@ -248,7 +256,23 @@ export class UwsResponse extends Writable {
 
       // Finalize response if not already done
       if (!this.finished && !this.aborted) {
-        this.send();
+        if (this.contentLengthTotal !== undefined) {
+          // Incomplete stream — fewer bytes sent than contentLengthTotal
+          this.atomic(() => {
+            if (!this.aborted) {
+              this.aborted = true;
+              this.uwsRes.close();
+            }
+            const cb = this.pendingFinalCallback;
+            this.pendingFinalCallback = undefined;
+            if (cb) {
+              cb(new Error('Incomplete content-length stream'));
+            }
+            this.emit('finish');
+          });
+        } else {
+          this.send();
+        }
       } else {
         // Already finished/aborted, invoke callback immediately
         const cb = this.pendingFinalCallback;
@@ -313,6 +337,18 @@ export class UwsResponse extends Writable {
       this.headers[lowerName] = value;
     }
 
+    // Track Content-Length for piping with tryEnd() mode
+    if (lowerName === 'content-length') {
+      const strValue = Array.isArray(value) ? value[value.length - 1] : value;
+      // Strict numeric check: must be a non-negative integer string
+      if (typeof strValue === 'string' && /^\d+$/.test(strValue)) {
+        this.contentLengthTotal = Number(strValue);
+      } else {
+        // Invalid value — drop tryEnd mode rather than retaining a stale total
+        this.contentLengthTotal = undefined;
+      }
+    }
+
     return this;
   }
 
@@ -359,7 +395,11 @@ export class UwsResponse extends Writable {
     if (this._headersSent) {
       throw new Error('Cannot remove headers after they are sent');
     }
-    delete this.headers[name.toLowerCase()];
+    const lowerName = name.toLowerCase();
+    delete this.headers[lowerName];
+    if (lowerName === 'content-length') {
+      this.contentLengthTotal = undefined;
+    }
     return this;
   }
 
@@ -1061,6 +1101,10 @@ export class UwsResponse extends Writable {
 
     // Write headers
     for (const [name, value] of Object.entries(this.headers)) {
+      // Skip content-length when using tryEnd() mode — tryEnd() writes it internally
+      if (name === 'content-length' && this.contentLengthTotal !== undefined) {
+        continue;
+      }
       if (Array.isArray(value)) {
         // Write each value separately for multi-value headers
         for (const v of value) {

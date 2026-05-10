@@ -540,8 +540,13 @@ export class UwsResponse extends Writable {
    * Use `process.env.NODE_ENV === 'production'` to conditionally enable it.
    *
    * @param name - Cookie name
-   * @param value - Cookie value (string or object for JSON serialization)
+   * @param value - Cookie value. Objects are automatically serialized to JSON.
+   *                Must be JSON-serializable (no circular references, functions, BigInt, or other
+   *                types that JSON cannot handle). Passing non-serializable values will throw.
    * @param options - Cookie options
+   *
+   * @throws {TypeError} If value contains circular references or non-serializable data
+   * @throws {Error} If headers are already sent
    * @returns this for chaining
    *
    * @example

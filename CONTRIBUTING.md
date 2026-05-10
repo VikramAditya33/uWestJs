@@ -10,6 +10,19 @@ Before writing any code, read the relevant documentation at [uwest.js.org/docs](
 
 ---
 
+## Getting Assigned to an Issue
+
+Before starting work on any issue, please follow these steps to avoid duplicate effort:
+
+1. Browse the [Issues tab](https://github.com/FOSSFORGE/uWestJS/issues) and find one you'd like to work on.
+2. Leave a comment on the issue saying you'd like to work on it (e.g. _"I'd like to work on this issue"_).
+3. Wait for a maintainer to officially assign it to you.
+4. Once assigned, start working and open a Pull Request when ready.
+
+> **Note:** Please do not open a PR without being assigned first, as your work may conflict with someone else's.
+
+---
+
 ## CI must pass
 
 Every PR must pass CI before it will be reviewed. This includes the linter. Do not submit a PR with lint failures and expect reviewers to overlook them. Run the linter locally before pushing and fix all warnings and errors. If a lint rule seems wrong for your case, open a separate issue to discuss it rather than disabling the rule inline.
@@ -32,9 +45,9 @@ There are no flaky tests in this project. If your changes cause any tests to fai
 
 ## Rebase and squash before submitting
 
-Keep the commit history clean. Rebase your branch on top of the latest `main` (or the target branch) before opening a PR, and squash your commits into a small number of logical, well-described commits. A single commit is often appropriate for a focused change. Merge commits in your branch will be asked to be cleaned up before merge.
+Keep the commit history clean. Rebase your branch on top of the latest `main` (or the target branch) before opening a PR, and squash your commits into a small number of logical, well-described commits. A single commit is often appropriate for a focused change. Merge commits in your branch will be asked to be cleaned up before review begins.
 
-A good commit message states *what* changed and *why*, not just *how*.
+A good commit message states _what_ changed and _why_, not just _how_.
 
 ---
 

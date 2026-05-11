@@ -534,15 +534,19 @@ describe('UwsPlatformAdapter', () => {
     it('should enable static assets and register catch-all route', () => {
       adapter.useStaticAssets('/public');
 
-      // Should register a GET route for /*
+      // Should register both GET and HEAD routes for /*
+      expect(mockRegistry.register).toHaveBeenCalledTimes(2);
       expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/*', expect.any(Function));
+      expect(mockRegistry.register).toHaveBeenCalledWith('HEAD', '/*', expect.any(Function));
     });
 
     it('should respect silent option and not log', () => {
       adapter.useStaticAssets('/public', { silent: true });
 
-      // Should still register the route
+      // Should still register both GET and HEAD routes
+      expect(mockRegistry.register).toHaveBeenCalledTimes(2);
       expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/*', expect.any(Function));
+      expect(mockRegistry.register).toHaveBeenCalledWith('HEAD', '/*', expect.any(Function));
     });
 
     it('should register static assets route when custom options provided', () => {
@@ -551,8 +555,10 @@ describe('UwsPlatformAdapter', () => {
         etag: false,
       });
 
-      // Should register the route
+      // Should register both GET and HEAD routes
+      expect(mockRegistry.register).toHaveBeenCalledTimes(2);
       expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/*', expect.any(Function));
+      expect(mockRegistry.register).toHaveBeenCalledWith('HEAD', '/*', expect.any(Function));
     });
 
     it('should register multiple static asset routes when called multiple times', () => {
@@ -572,22 +578,28 @@ describe('UwsPlatformAdapter', () => {
     it('should support prefix option for scoped static routes', () => {
       adapter.useStaticAssets('/public', { prefix: '/assets' });
 
-      // Should register route with prefix
+      // Should register both GET and HEAD routes with the prefix
+      expect(mockRegistry.register).toHaveBeenCalledTimes(2);
       expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/assets/*', expect.any(Function));
+      expect(mockRegistry.register).toHaveBeenCalledWith('HEAD', '/assets/*', expect.any(Function));
     });
 
     it('should normalize prefix by removing trailing slash', () => {
       adapter.useStaticAssets('/public', { prefix: '/assets/' });
 
-      // Should register route with normalized prefix (no trailing slash)
+      // Should register both GET and HEAD routes with normalized prefix (no trailing slash)
+      expect(mockRegistry.register).toHaveBeenCalledTimes(2);
       expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/assets/*', expect.any(Function));
+      expect(mockRegistry.register).toHaveBeenCalledWith('HEAD', '/assets/*', expect.any(Function));
     });
 
     it('should handle empty prefix by using default catch-all', () => {
       adapter.useStaticAssets('/public', { prefix: '' });
 
-      // Should register default catch-all route
+      // Should register both GET and HEAD default catch-all routes
+      expect(mockRegistry.register).toHaveBeenCalledTimes(2);
       expect(mockRegistry.register).toHaveBeenCalledWith('GET', '/*', expect.any(Function));
+      expect(mockRegistry.register).toHaveBeenCalledWith('HEAD', '/*', expect.any(Function));
     });
 
     it('should throw error for invalid path (non-string)', () => {

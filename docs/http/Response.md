@@ -982,7 +982,7 @@ async streamEvents(@Res() res: UwsResponse) {
 2. **Use writeChunk() for streaming** - Automatic batching and backpressure handling
 3. **Set Content-Length when known** - Enables better client-side handling
 4. **Use ETags for caching** - Reduces bandwidth and server load
-5. **Enable compression** - Handled automatically by uWebSockets.js
+5. **Enable compression** - Enable via `compress` option in `UwsPlatformAdapter`
 6. **Stream large responses** - Prevents memory issues
 7. **Check isAborted before expensive operations** - Avoid wasted work
 

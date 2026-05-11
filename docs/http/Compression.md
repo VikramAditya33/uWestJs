@@ -15,7 +15,7 @@ Automatic request and response compression support for reducing bandwidth usage.
 
 ## Overview
 
-uWestJS provides built-in compression support for both requests and responses:
+uWestJS provides built-in compression support for requests and responses:
 
 - **Response Compression** - Automatically compress responses based on client capabilities
 - **Request Decompression** - Automatically decompress incoming compressed requests
@@ -38,7 +38,7 @@ import { UwsPlatformAdapter } from 'uwestjs';
 const app = await NestFactory.create(
   AppModule,
   new UwsPlatformAdapter({
-    compression: {
+    compress: {
       threshold: 1024, // Compress responses >= 1KB
       level: 6, // Balanced compression
       brotli: true, // Enable brotli
@@ -55,8 +55,6 @@ interface CompressionOptions {
   level?: number;
   brotli?: boolean;
   filter?: (req: UwsRequest, res: UwsResponse) => boolean;
-  inflate?: boolean;
-  maxInflatedBodySize?: number;
 }
 ```
 
@@ -74,7 +72,7 @@ Minimum response size (in bytes) to compress. Responses smaller than this won't 
 
 ```typescript
 new UwsPlatformAdapter({
-  compression: {
+  compress: {
     threshold: 2048, // Only compress responses >= 2KB
   },
 })
@@ -101,7 +99,7 @@ For Brotli, this is automatically mapped to quality 0-11 (level 9 → quality 11
 
 ```typescript
 new UwsPlatformAdapter({
-  compression: {
+  compress: {
     level: 9, // Maximum compression
   },
 })
@@ -121,7 +119,7 @@ Enable brotli compression in addition to gzip/deflate.
 
 ```typescript
 new UwsPlatformAdapter({
-  compression: {
+  compress: {
     brotli: true, // Enable brotli
   },
 })
@@ -141,7 +139,7 @@ Custom function to determine if a response should be compressed. Return `false` 
 import { UwsRequest, UwsResponse } from 'uwestjs';
 
 new UwsPlatformAdapter({
-  compression: {
+  compress: {
     filter: (req: UwsRequest, res: UwsResponse) => {
       // Don't compress responses for specific paths
       if (req.url.startsWith('/api/stream')) {
@@ -153,45 +151,7 @@ new UwsPlatformAdapter({
 })
 ```
 
-### inflate
 
-```typescript
-inflate?: boolean
-```
-
-Enable automatic decompression of incoming compressed request bodies (gzip, deflate, brotli).
-
-**Default:** `true`
-
-**Example:**
-
-```typescript
-new UwsPlatformAdapter({
-  compression: {
-    inflate: false, // Disable request decompression
-  },
-})
-```
-
-### maxInflatedBodySize
-
-```typescript
-maxInflatedBodySize?: number
-```
-
-Maximum size (in bytes) of decompressed request body. Protects against decompression bombs (zip bombs).
-
-**Default:** `10485760` (10MB)
-
-**Example:**
-
-```typescript
-new UwsPlatformAdapter({
-  compression: {
-    maxInflatedBodySize: 5 * 1024 * 1024, // 5MB limit
-  },
-})
-```
 
 ---
 
@@ -266,10 +226,10 @@ For streaming responses, compression is applied on-the-fly:
 @Controller('api')
 export class StreamController {
   @Get('stream')
-  streamData(@Res() res: Response) {
+  streamData(@Res() res: UwsResponse) {
     // Stream will be compressed automatically
     const stream = fs.createReadStream('large-file.json');
-    stream.pipe(res);
+    res.stream(stream);
   }
 }
 ```
@@ -291,7 +251,7 @@ Content-Type: application/json
 
 ### Automatic Decompression
 
-Incoming compressed requests are automatically decompressed based on the `Content-Encoding` header:
+Incoming compressed requests are automatically decompressed based on the `Content-Encoding` header. This happens at the stream level before body parsing.
 
 ```typescript
 @Controller('api')
@@ -313,19 +273,30 @@ export class UploadController {
 
 ### Size Limits
 
-Decompressed request size is limited to prevent memory exhaustion from decompression bombs (zip bombs).
-
-**Default limit:** 10MB decompressed
-
-This limit is controlled by the `maxInflatedBodySize` configuration option. You can adjust it based on your application's needs:
+Decompressed request size is limited by the body parser's `maxBodySize` option (default: 1MB). This protects against decompression bombs:
 
 ```typescript
 new UwsPlatformAdapter({
-  compression: {
-    maxInflatedBodySize: 5 * 1024 * 1024, // 5MB limit
-  },
+  maxBodySize: 5 * 1024 * 1024, // 5MB limit
 })
 ```
+
+### Manual Decompression
+
+If you need to decompress buffers outside the automatic pipeline (e.g., in custom middleware), `CompressionHandler.decompressRequest()` is available. It also accepts `inflate` and `maxInflatedBodySize` options for fine-grained control:
+
+```typescript
+import { CompressionHandler } from 'uwestjs';
+
+const handler = new CompressionHandler({
+  inflate: true,
+  maxInflatedBodySize: 5 * 1024 * 1024, // 5MB
+});
+
+const decompressed = await handler.decompressRequest(req, compressedBuffer);
+```
+
+> **Note:** These options only affect manual `decompressRequest()` calls. Automatic request decompression uses the body parser's `maxBodySize` and cannot be disabled via `inflate`.
 
 **Example client request:**
 
@@ -351,7 +322,7 @@ import { UwsPlatformAdapter } from 'uwestjs';
 const app = await NestFactory.create(
   AppModule,
   new UwsPlatformAdapter({
-    compression: {
+    compress: {
       threshold: 1024, // 1KB
       level: 6, // Default compression
     },
@@ -367,7 +338,7 @@ For maximum compression (slower, but smaller responses):
 
 ```typescript
 new UwsPlatformAdapter({
-  compression: {
+  compress: {
     level: 9, // Maximum compression
     brotli: true, // Enable brotli
   },
@@ -380,7 +351,7 @@ For faster compression (larger responses, but faster):
 
 ```typescript
 new UwsPlatformAdapter({
-  compression: {
+  compress: {
     level: 1, // Fastest compression
     brotli: true, // Enable brotli
   },
@@ -395,7 +366,7 @@ Compress only specific routes:
 import { UwsRequest, UwsResponse } from 'uwestjs';
 
 new UwsPlatformAdapter({
-  compression: {
+  compress: {
     filter: (req: UwsRequest, res: UwsResponse) => {
       // Only compress API responses
       if (req.url.startsWith('/api/')) {
@@ -417,7 +388,7 @@ Only compress very large responses:
 
 ```typescript
 new UwsPlatformAdapter({
-  compression: {
+  compress: {
     threshold: 10240, // Only compress responses >= 10KB
   },
 })
@@ -429,7 +400,7 @@ Use only gzip and deflate:
 
 ```typescript
 new UwsPlatformAdapter({
-  compression: {
+  compress: {
     brotli: false, // Disable brotli (default)
   },
 })
@@ -477,7 +448,8 @@ export class UploadController {
     //   --data-binary @data.json.gz \
     //   http://localhost:3000/api/upload-compressed
     
-    // Data is automatically decompressed
+    // Request body decompression is available via CompressionHandler.decompressRequest()
+    // but is not automatically wired into the request pipeline.
     console.log('Received data:', data);
     return { received: true, size: JSON.stringify(data).length };
   }
@@ -490,12 +462,12 @@ export class UploadController {
 @Controller('api')
 export class StreamController {
   @Get('stream-large-file')
-  streamLargeFile(@Res() res: Response) {
+  streamLargeFile(@Res() res: UwsResponse) {
     res.setHeader('Content-Type', 'application/json');
     
     // Stream will be compressed automatically
     const stream = fs.createReadStream('large-data.json');
-    stream.pipe(res);
+    res.stream(stream);
   }
 }
 ```

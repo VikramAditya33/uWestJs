@@ -60,6 +60,20 @@ describe('RouteRegistry - Middleware Integration', () => {
       expect(executionOrder).toEqual(['guard', 'handler']);
     });
 
+    it('should accept guard instances from route metadata', async () => {
+      const guard: CanActivate = {
+        canActivate: jest.fn().mockReturnValue(true),
+      };
+      const handler = jest.fn();
+
+      registry.register('GET', '/instance-guard', handler, { guards: [guard] });
+
+      await registeredRoutes.get('GET:/instance-guard')?.handler!(mockUwsRes, mockUwsReq);
+
+      expect(guard.canActivate).toHaveBeenCalled();
+      expect(handler).toHaveBeenCalled();
+    });
+
     it('should deny access when guard returns false', async () => {
       class DenyGuard implements CanActivate {
         async canActivate(): Promise<boolean> {
@@ -286,6 +300,45 @@ describe('RouteRegistry - Middleware Integration', () => {
       expect(capturedBody).toEqual({ number: 10 });
     });
 
+    it('should accept pipe instances from route metadata', async () => {
+      const pipe: PipeTransform = {
+        transform: jest.fn((value) =>
+          typeof value === 'object' && value !== null && 'name' in value
+            ? { ...value, name: 'Ada' }
+            : value
+        ),
+      };
+
+      let capturedBody: any;
+      const handler = jest.fn(async (req) => {
+        capturedBody = await req.body;
+      });
+      const bodyData = JSON.stringify({ name: 'Grace' });
+      const bodyBuffer = Buffer.from(bodyData);
+
+      mockUwsReq.forEach = jest.fn((callback) => {
+        callback('content-type', 'application/json');
+        callback('content-length', String(bodyBuffer.length));
+      });
+
+      const { mockRes, callbacks } = createMockUwsResponse();
+      mockUwsRes = mockRes;
+
+      registry.register('POST', '/instance-pipe', handler, { pipes: [pipe] });
+
+      const handlerPromise = registeredRoutes.get('POST:/instance-pipe')?.handler!(
+        mockUwsRes,
+        mockUwsReq
+      );
+
+      await new Promise((resolve) => setImmediate(resolve));
+      callbacks.onData!(toArrayBuffer(bodyBuffer), true);
+      await handlerPromise;
+
+      expect(pipe.transform).toHaveBeenCalled();
+      expect(capturedBody).toEqual({ name: 'Ada' });
+    });
+
     it('should execute multiple pipes in order', async () => {
       const executionOrder: string[] = [];
 
@@ -465,6 +518,25 @@ describe('RouteRegistry - Middleware Integration', () => {
 
       expect(filterExecuted).toHaveBeenCalledWith('Test error');
       expect(mockUwsRes.writeStatus).toHaveBeenCalledWith('400 Bad Request');
+    });
+
+    it('should accept exception filter instances from route metadata', async () => {
+      const filter: ExceptionFilter = {
+        catch: jest.fn((_exception: Error, host: any) => {
+          const response = host.switchToHttp().getResponse();
+          response.status(418).send({ error: 'handled by instance' });
+        }),
+      };
+      const handler = jest.fn(() => {
+        throw new Error('Test error');
+      });
+
+      registry.register('GET', '/instance-filter', handler, { filters: [filter] });
+
+      await registeredRoutes.get('GET:/instance-filter')?.handler!(mockUwsRes, mockUwsReq);
+
+      expect(filter.catch).toHaveBeenCalled();
+      expect(mockUwsRes.writeStatus).toHaveBeenCalledWith("418 I'm a Teapot");
     });
 
     it('should use default error handling when no filters provided', async () => {

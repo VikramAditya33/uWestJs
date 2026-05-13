@@ -23,6 +23,9 @@ import { ModuleRef, DefaultModuleRef } from '../../shared/di';
  * Route handler function type
  */
 export type RouteHandler = (req: UwsRequest, res: UwsResponse) => void | Promise<void>;
+export type GuardProvider = Type<CanActivate> | CanActivate;
+export type PipeProvider = Type<PipeTransform> | PipeTransform;
+export type ExceptionFilterProvider = Type<ExceptionFilter> | ExceptionFilter;
 
 /**
  * Route metadata for middleware execution
@@ -36,17 +39,17 @@ export interface RouteMetadata {
   /**
    * Guards to execute before handler
    */
-  guards?: Type<CanActivate>[];
+  guards?: GuardProvider[];
 
   /**
    * Pipes to execute on request body
    */
-  pipes?: Type<PipeTransform>[];
+  pipes?: PipeProvider[];
 
   /**
    * Exception filters to handle errors
    */
-  filters?: Type<ExceptionFilter>[];
+  filters?: ExceptionFilterProvider[];
 
   /**
    * Optional argument metadata for pipe transformation
@@ -497,12 +500,13 @@ export class RouteRegistry {
    */
   private async executeGuards(
     context: HttpExecutionContext,
-    guards: Type<CanActivate>[]
+    guards: GuardProvider[]
   ): Promise<boolean> {
     for (const GuardType of guards) {
+      const guardName = this.getMiddlewareName(GuardType);
+
       try {
-        // Resolve guard from DI container (or instantiate if no DI)
-        const guard = this.moduleRef.get(GuardType);
+        const guard = this.resolveGuard(GuardType);
 
         // Execute guard - cast to ExecutionContext for compatibility
         // Guards can return boolean, Promise<boolean>, or Observable<boolean>
@@ -517,7 +521,7 @@ export class RouteRegistry {
       } catch (error) {
         // Guard threw an error - propagate to exception filters
         // This allows HttpException status codes to be preserved
-        this.logger.error(`Guard ${GuardType.name} threw an error:`, error);
+        this.logger.error(`Guard ${guardName} threw an error:`, error);
         throw error;
       }
     }
@@ -534,7 +538,7 @@ export class RouteRegistry {
    * @returns Transformed value
    */
   private async executePipes(
-    pipes: Type<PipeTransform>[],
+    pipes: PipeProvider[],
     value: unknown,
     argMetadata?: ArgumentMetadata
   ): Promise<unknown> {
@@ -548,9 +552,10 @@ export class RouteRegistry {
     };
 
     for (const PipeType of pipes) {
+      const pipeName = this.getMiddlewareName(PipeType);
+
       try {
-        // Resolve pipe from DI container (or instantiate if no DI)
-        const pipe = this.moduleRef.get(PipeType);
+        const pipe = this.resolvePipe(PipeType);
 
         // Execute pipe - pipes can return value, Promise<value>, or Observable<value>
         const pipeResult = pipe.transform(transformedValue, metadata);
@@ -559,7 +564,7 @@ export class RouteRegistry {
           : await pipeResult;
       } catch (error) {
         // Pipe threw an error - propagate to exception filters
-        this.logger.error(`Pipe ${PipeType.name} threw an error:`, error);
+        this.logger.error(`Pipe ${pipeName} threw an error:`, error);
         throw error;
       }
     }
@@ -592,9 +597,10 @@ export class RouteRegistry {
       const filterErrors: Array<{ filterName: string; error: Error }> = [];
 
       for (const FilterType of metadata.filters) {
+        const filterName = this.getMiddlewareName(FilterType);
+
         try {
-          // Resolve filter from DI container (or instantiate if no DI)
-          const filter = this.moduleRef.get(FilterType);
+          const filter = this.resolveFilter(FilterType);
 
           // Create arguments host
           const host = this.createArgumentsHost(context);
@@ -616,10 +622,10 @@ export class RouteRegistry {
         } catch (filterError) {
           // Accumulate filter errors for debugging
           filterErrors.push({
-            filterName: FilterType.name,
+            filterName,
             error: filterError as Error,
           });
-          this.logger.error(`Exception filter ${FilterType.name} threw an error:`, filterError);
+          this.logger.error(`Exception filter ${filterName} threw an error:`, filterError);
         }
       }
 
@@ -657,6 +663,22 @@ export class RouteRegistry {
         });
       }
     }
+  }
+
+  private resolveGuard(guard: GuardProvider): CanActivate {
+    return typeof guard === 'function' ? this.moduleRef.get(guard) : guard;
+  }
+
+  private resolvePipe(pipe: PipeProvider): PipeTransform {
+    return typeof pipe === 'function' ? this.moduleRef.get(pipe) : pipe;
+  }
+
+  private resolveFilter(filter: ExceptionFilterProvider): ExceptionFilter {
+    return typeof filter === 'function' ? this.moduleRef.get(filter) : filter;
+  }
+
+  private getMiddlewareName(middleware: Type<unknown> | object): string {
+    return typeof middleware === 'function' ? middleware.name : middleware.constructor.name;
   }
 
   /**

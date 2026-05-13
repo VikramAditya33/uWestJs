@@ -115,7 +115,7 @@
     "@types/jest": "^30.0.0",
     "@types/mime-types": "^3.0.1",
     "@types/ms": "^2.1.0",
-    "@types/node": "^24.0.0",
+    "@types/node": "^25.6.0",
     "@types/range-parser": "^1.2.7",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",

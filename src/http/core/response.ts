@@ -1349,11 +1349,7 @@ export class UwsResponse extends Writable {
 
             if (retryFlushed) {
               // Successfully flushed, now send the final body
-              if (body !== undefined) {
-                this.uwsRes.end(body);
-              } else {
-                this.uwsRes.end();
-              }
+              this.endResponse(body);
 
               this._finishSend();
 
@@ -1365,11 +1361,7 @@ export class UwsResponse extends Writable {
           });
         } else {
           // No backpressure, send immediately
-          if (body !== undefined) {
-            this.uwsRes.end(body);
-          } else {
-            this.uwsRes.end();
-          }
+          this.endResponse(body);
 
           this._finishSend();
         }
@@ -1395,6 +1387,20 @@ export class UwsResponse extends Writable {
     }
 
     this.emit('finish');
+  }
+
+  private endResponse(body: string | Buffer | undefined): void {
+    if (body !== undefined) {
+      this.uwsRes.end(body);
+      return;
+    }
+
+    if (this.contentLengthTotal !== undefined) {
+      this.uwsRes.endWithoutBody(this.contentLengthTotal);
+      return;
+    }
+
+    this.uwsRes.end();
   }
 
   /**

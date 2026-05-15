@@ -154,6 +154,7 @@ export function createMockUwsResponse(options: MockUwsResponseOptions = {}): {
     writeHeader: jest.fn().mockReturnThis(),
     write: jest.fn(() => writeSuccess),
     end: jest.fn(),
+    endWithoutBody: jest.fn(),
     getWriteOffset: jest.fn(() => 0),
     tryEnd: jest.fn(() => [writeSuccess, tryEndComplete]),
     pause: jest.fn(),

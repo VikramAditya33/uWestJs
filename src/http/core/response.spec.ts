@@ -512,6 +512,14 @@ describe('UwsResponse', () => {
       expect(mockUwsRes.end).toHaveBeenCalledWith();
     });
 
+    it('should end without body when an empty response has content-length', () => {
+      res.setHeader('content-length', '1024').send();
+
+      expect(mockUwsRes.writeHeader).not.toHaveBeenCalledWith('content-length', '1024');
+      expect(mockUwsRes.endWithoutBody).toHaveBeenCalledWith(1024);
+      expect(mockUwsRes.end).not.toHaveBeenCalled();
+    });
+
     it('should use custom status code', () => {
       res.status(404).send('Not Found');
       expect(mockUwsRes.writeStatus).toHaveBeenCalledWith('404 Not Found');

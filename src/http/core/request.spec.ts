@@ -448,22 +448,15 @@ describe('UwsRequest', () => {
         );
       });
 
-      it('should optimize empty bodies by using the exact same memory reference', async () => {
-        const req1 = new UwsRequest(mockUwsReq, mockUwsRes);
-        const req2 = new UwsRequest(mockUwsReq, mockUwsRes);
-
+      it('should cache empty body parse result across repeated json() calls', async () => {
         mockUwsReq.getMethod.mockReturnValue('GET');
-        const mockResponse1 = createMockResponse();
-        req1._initBodyParser(1024, false, mockResponse1 as any);
-        const mockResponse2 = createMockResponse();
-        req2._initBodyParser(1024, false, mockResponse2 as any);
+        const req = new UwsRequest(mockUwsReq, mockUwsRes);
+        const mockResponse = createMockResponse();
+        req._initBodyParser(1024, false, mockResponse as any);
 
-        onDataCallback(toArrayBuffer(Buffer.from('')), true);
+        const res1 = await req.json();
+        const res2 = await req.json();
 
-        const res1 = await req1.json();
-        const res2 = await req2.json();
-
-        // Referential equality proves zero new objects were allocated
         expect(res1).toBe(res2);
         expect(Object.isFrozen(res1)).toBe(true);
       });

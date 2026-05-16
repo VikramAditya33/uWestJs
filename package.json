@@ -119,7 +119,7 @@
     "@types/range-parser": "^1.2.7",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
-    "eslint": "^10.0.0",
+    "eslint": "^10.3.0",
     "eslint-config-prettier": "^10.0.0",
     "eslint-plugin-prettier": "^5.0.0",
     "globals": "^17.4.0",

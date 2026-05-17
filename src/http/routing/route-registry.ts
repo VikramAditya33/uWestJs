@@ -245,6 +245,19 @@ export class RouteRegistry {
       metadata,
     });
 
+    // Auto-register HEAD route for GET routes (RFC 9110 §9.3.2)
+    if (normalizedMethod === 'GET') {
+      this.routes.set(`HEAD:${path}`, {
+        method: 'HEAD',
+        path,
+        uwsPath,
+        pattern,
+        paramNames,
+        isComplex,
+        handler,
+        metadata,
+      });
+    }
     // Get the uWS method function
     const uwsMethodFn = this.uwsApp[uwsMethod as keyof uWS.TemplatedApp] as any;
 

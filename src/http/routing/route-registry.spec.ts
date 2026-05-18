@@ -402,6 +402,30 @@ describe('RouteRegistry', () => {
   });
 
   describe('error handling', () => {
+    it('should silently ignore "Connection aborted" errors', async () => {
+      const loggerErrorSpy = jest.fn();
+      const mockLogger = { error: loggerErrorSpy };
+
+      const registryWithLogger = new RouteRegistry(mockUwsApp, {
+        maxBodySize: 1024 * 1024,
+        logger: mockLogger,
+      });
+
+      const handler = jest.fn().mockRejectedValue(new Error('Connection aborted'));
+      registryWithLogger.register('GET', '/abort', handler);
+
+      const uwsHandler = registeredRoutes.get('GET:/abort')?.handler;
+      expect(uwsHandler).toBeDefined();
+
+      const { mockUwsRes, mockUwsReq } = createMockUwsReqRes();
+      await uwsHandler!(mockUwsRes, mockUwsReq);
+
+      // Must NOT log — client disconnect is not a server error
+      expect(loggerErrorSpy).not.toHaveBeenCalled();
+      // Must NOT attempt to send a 500 response
+      expect(mockUwsRes.writeStatus).not.toHaveBeenCalledWith('500 Internal Server Error');
+    });
+
     it('should handle errors in route handler', async () => {
       const handler = jest.fn().mockRejectedValue(new Error('Handler error'));
       registry.register('GET', '/error', handler);

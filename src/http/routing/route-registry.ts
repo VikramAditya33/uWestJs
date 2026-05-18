@@ -622,6 +622,11 @@ export class RouteRegistry {
     handler: RouteHandler,
     metadata?: RouteMetadata
   ): Promise<void> {
+    // Client disconnected mid-request — not a server error, nothing to log or respond to.
+    if (res.isAborted || error.message === 'Connection aborted') {
+      return;
+    }
+
     // Log error for debugging (server-side only)
     this.logger.error('Unhandled route error:', error);
 

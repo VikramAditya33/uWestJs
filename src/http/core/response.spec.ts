@@ -953,6 +953,62 @@ describe('UwsResponse', () => {
     });
   });
 
+  describe('_write() backpressure callback deferral', () => {
+    beforeEach(() => {
+      res = createResponse();
+    });
+
+    it('should defer _write() callback when backpressure is detected', () => {
+      (mockUwsRes.write as jest.Mock).mockReturnValue(false);
+
+      const callback = jest.fn();
+      (res as any)['_write']('chunk', 'utf8', callback);
+
+      expect(mockUwsRes.write).toHaveBeenCalledTimes(1);
+      expect(callback).not.toHaveBeenCalled();
+      expect((res as any)['flushBackpressure']).toBe(true);
+
+      // Simulate drain
+      (mockUwsRes.write as jest.Mock).mockReturnValue(true);
+      callbacks.onWritable!();
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith();
+      expect((res as any)['flushBackpressure']).toBe(false);
+    });
+
+    it('should invoke _write() callback with error on abort during backpressure', () => {
+      (mockUwsRes.write as jest.Mock).mockReturnValue(false);
+
+      // Register abort handler so callbacks.onAborted is available
+      res._onAbort(() => {});
+
+      const callback = jest.fn();
+      (res as any)['_write']('chunk', 'utf8', callback);
+
+      expect(callback).not.toHaveBeenCalled();
+
+      // Simulate abort
+      callbacks.onAborted!();
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith(expect.any(Error));
+      expect((res as any)['flushBackpressure']).toBe(false);
+    });
+
+    it('should call _write() callback immediately when no backpressure', () => {
+      (mockUwsRes.write as jest.Mock).mockReturnValue(true);
+
+      const callback = jest.fn();
+      (res as any)['_write']('chunk', 'utf8', callback);
+
+      expect(mockUwsRes.write).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith();
+      expect((res as any)['flushBackpressure']).toBe(false);
+    });
+  });
+
   // Helper to create a proper Readable stream for manual read() testing
   const createManualReadable = (chunks: Buffer[]) => {
     const remaining = [...chunks];

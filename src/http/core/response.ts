@@ -88,6 +88,10 @@ export class UwsResponse extends Writable {
   private abortCallbacks: Array<() => void> = [];
   private abortHandlerRegistered = false;
 
+  // Backpressure tracking for chunked _write() callback deferral
+  private flushBackpressure = false;
+  private pendingDrainCallback?: (error?: Error | null) => void;
+
   // Compression support
   private req?: UwsRequest;
   private compressionHandler?: CompressionHandler;
@@ -153,6 +157,10 @@ export class UwsResponse extends Writable {
           callback(new Error('Connection aborted'));
         }
 
+        // Clear backpressure state and invoke pending drain callback
+        this.flushBackpressure = false;
+        this._invokeDrainCallback(new Error('Connection aborted'));
+
         // Emit 'close' event for Writable stream compatibility
         this.emit('close');
 
@@ -165,6 +173,22 @@ export class UwsResponse extends Writable {
           }
         }
       });
+    }
+  }
+
+  /**
+   * Invoke pending drain callback and clear it.
+   * Used to resume Writable stream pumping after backpressure clears.
+   */
+  private _invokeDrainCallback(error?: Error | null): void {
+    if (this.pendingDrainCallback) {
+      const cb = this.pendingDrainCallback;
+      this.pendingDrainCallback = undefined;
+      if (error) {
+        cb(error);
+      } else {
+        cb();
+      }
     }
   }
 
@@ -230,7 +254,11 @@ export class UwsResponse extends Writable {
     } else {
       // Chunked mode: use writeChunk() batching for fewer syscalls
       this.writeChunk(chunk, encoding);
-      callback();
+      if (this.flushBackpressure) {
+        this.pendingDrainCallback = callback;
+      } else {
+        callback();
+      }
     }
   }
 
@@ -759,15 +787,26 @@ export class UwsResponse extends Writable {
 
         // If backpressure detected, schedule retry via onWritable
         if (!writeResult && !this.finished && !this.aborted) {
+          this.flushBackpressure = true;
           this.uwsRes.onWritable(() => {
             // Check if connection is still active
             if (this.finished || this.aborted) {
+              this.flushBackpressure = false;
+              this._invokeDrainCallback(new Error('Connection aborted'));
               return true; // Remove handler
             }
 
             // Retry flushing pending chunks
-            return this.flushChunks();
+            const flushed = this.flushChunks();
+            if (flushed) {
+              this.flushBackpressure = false;
+              this._invokeDrainCallback();
+            }
+            return flushed;
           });
+        } else if (writeResult) {
+          this.flushBackpressure = false;
+          this._invokeDrainCallback();
         }
       } else if (!this.flushTimeout) {
         // Schedule flush after timeout
@@ -775,7 +814,11 @@ export class UwsResponse extends Writable {
           this.flushTimeout = undefined;
           if (!this.finished && !this.aborted) {
             this.atomic(() => {
-              this.flushChunks();
+              const flushed = this.flushChunks();
+              if (flushed) {
+                this.flushBackpressure = false;
+                this._invokeDrainCallback();
+              }
             });
           }
         }, this.FLUSH_INTERVAL);

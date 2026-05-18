@@ -84,6 +84,7 @@ export interface RouteInfo {
   isComplex: boolean; // Uses regex matching instead of native uWS
   handler: RouteHandler; // Store the handler
   metadata?: RouteMetadata; // Middleware metadata
+  implicitHead?: boolean; // Auto-registered HEAD fallback for GET routes
 }
 
 /**
@@ -211,7 +212,13 @@ export class RouteRegistry {
    * @param metadata - Optional middleware metadata (guards, pipes, filters)
    * @throws Error if route is already registered
    */
-  register(method: string, path: string, handler: RouteHandler, metadata?: RouteMetadata): void {
+  register(
+    method: string,
+    path: string,
+    handler: RouteHandler,
+    metadata?: RouteMetadata,
+    implicitHead = false
+  ): void {
     // Convert method to uWS format and normalize to uppercase for consistency
     const uwsMethod = this.convertMethod(method);
     const normalizedMethod = method.toUpperCase();
@@ -226,15 +233,41 @@ export class RouteRegistry {
 
     // Check for duplicate route registration using normalized method
     const routeKey = `${normalizedMethod}:${path}`;
-    if (this.routes.has(routeKey)) {
+    const existingRoute = this.routes.get(routeKey);
+    if (existingRoute) {
+      if (implicitHead) {
+        return;
+      }
+
+      if (normalizedMethod === 'HEAD' && existingRoute.implicitHead) {
+        const routeInfo = {
+          method: normalizedMethod,
+          path,
+          uwsPath,
+          pattern,
+          paramNames,
+          isComplex,
+          handler,
+          metadata,
+        };
+
+        this.routes.set(routeKey, routeInfo);
+        if (isComplex) {
+          const staticPrefix = this.extractStaticPrefix(path);
+          const registrationPath = staticPrefix ? `${staticPrefix}/*` : '/*';
+          const wildcardKey = `${uwsMethod}:${registrationPath}`;
+          this.replaceComplexRoute(wildcardKey, routeInfo);
+        }
+        return;
+      }
+
       throw new Error(
         `Route already registered: ${normalizedMethod} ${path}. ` +
           `Duplicate route registration is not allowed as it would cause multiple handlers to execute for the same route.`
       );
     }
 
-    // Track registered route with normalized method
-    this.routes.set(routeKey, {
+    const routeInfo = {
       method: normalizedMethod,
       path,
       uwsPath,
@@ -243,7 +276,11 @@ export class RouteRegistry {
       isComplex,
       handler,
       metadata,
-    });
+      implicitHead,
+    };
+
+    // Track registered route with normalized method
+    this.routes.set(routeKey, routeInfo);
 
     // Get the uWS method function
     const uwsMethodFn = this.uwsApp[uwsMethod as keyof uWS.TemplatedApp] as any;
@@ -345,22 +382,15 @@ export class RouteRegistry {
       }
 
       // Add this route to the wildcard's route list
-      this.complexRoutesByWildcard.get(wildcardKey)!.push({
-        method: normalizedMethod,
-        path,
-        uwsPath,
-        pattern,
-        paramNames,
-        isComplex,
-        handler,
-        metadata,
-      });
+      this.complexRoutesByWildcard.get(wildcardKey)!.push(routeInfo);
     } else {
       // Simple route - use native uWS routing
       uwsMethodFn.call(
         this.uwsApp,
         uwsPath,
         async (uwsRes: uWS.HttpResponse, uwsReq: uWS.HttpRequest) => {
+          const activeRoute = this.routes.get(routeKey)!;
+
           // Create request/response wrappers
           const req = new UwsRequest(uwsReq, uwsRes, paramNames);
           const res = new UwsResponse(uwsRes);
@@ -383,9 +413,13 @@ export class RouteRegistry {
           );
 
           // Execute handler with error handling
-          await this.executeHandler(handler, req, res, metadata);
+          await this.executeHandler(activeRoute.handler, req, res, activeRoute.metadata);
         }
       );
+    }
+
+    if (normalizedMethod === 'GET' && !implicitHead) {
+      this.register('HEAD', path, handler, metadata, true);
     }
   }
 
@@ -896,7 +930,7 @@ export class RouteRegistry {
    * @returns Map of route keys to route information
    */
   getRoutes(): Map<string, RouteInfo> {
-    return new Map(this.routes);
+    return new Map([...this.routes].filter(([, route]) => !route.implicitHead));
   }
 
   /**
@@ -918,7 +952,21 @@ export class RouteRegistry {
    * @returns Number of registered routes
    */
   getRouteCount(): number {
-    return this.routes.size;
+    return [...this.routes.values()].filter((route) => !route.implicitHead).length;
+  }
+
+  private replaceComplexRoute(wildcardKey: string, routeInfo: RouteInfo): void {
+    const routes = this.complexRoutesByWildcard.get(wildcardKey);
+    if (!routes) {
+      return;
+    }
+
+    const routeIndex = routes.findIndex(
+      (route) => route.method === routeInfo.method && route.path === routeInfo.path
+    );
+    if (routeIndex !== -1) {
+      routes[routeIndex] = routeInfo;
+    }
   }
 
   /**

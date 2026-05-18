@@ -69,6 +69,47 @@ describe('RouteRegistry', () => {
       // Verify route lookup is also case-insensitive
       expect(registry.hasRoute('GET', '/users')).toBe(true);
     });
+
+    it('should implicitly register HEAD for GET routes', async () => {
+      const handler = jest.fn((_req, res) => res.status(204).send());
+      registry.register('GET', '/items/:id', handler);
+
+      expect(mockUwsApp.get).toHaveBeenCalledWith('/items/:id', expect.any(Function));
+      expect(mockUwsApp.head).toHaveBeenCalledWith('/items/:id', expect.any(Function));
+      expect(registry.hasRoute('HEAD', '/items/:id')).toBe(true);
+      expect(registry.getRouteCount()).toBe(1);
+
+      const route = registeredRoutes.get('HEAD:/items/:id');
+      expect(route).toBeDefined();
+
+      const { mockUwsRes, mockUwsReq } = createMockUwsReqRes('head', '/items/42');
+      await route!.handler(mockUwsRes, mockUwsReq);
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(mockUwsRes.writeStatus).toHaveBeenCalledWith('204 No Content');
+      expect(mockUwsRes.end).toHaveBeenCalledWith();
+    });
+
+    it('should let an explicit HEAD route override an implicit GET fallback', async () => {
+      const getHandler = jest.fn((_req, res) => res.send('get'));
+      const headHandler = jest.fn((_req, res) => res.status(204).send());
+
+      registry.register('GET', '/items/:id', getHandler);
+      registry.register('HEAD', '/items/:id', headHandler);
+
+      expect(mockUwsApp.head).toHaveBeenCalledTimes(1);
+
+      const route = registeredRoutes.get('HEAD:/items/:id');
+      expect(route).toBeDefined();
+
+      const { mockUwsRes, mockUwsReq } = createMockUwsReqRes('head', '/items/42');
+      await route!.handler(mockUwsRes, mockUwsReq);
+
+      expect(getHandler).not.toHaveBeenCalled();
+      expect(headHandler).toHaveBeenCalledTimes(1);
+      expect(mockUwsRes.writeStatus).toHaveBeenCalledWith('204 No Content');
+      expect(mockUwsRes.end).toHaveBeenCalledWith();
+    });
   });
 
   describe('path handling', () => {

@@ -16,7 +16,7 @@ const sharedRules = {
 export default [
   // Ignore patterns
   {
-    ignores: ['dist/', 'node_modules/', 'coverage/', '*.config.js', '*.config.mjs', 'benchmarks/node_modules/'],
+    ignores: ['**/dist/', '**/node_modules/', '**/coverage/', '**/*.config.js', '**/*.config.mjs', '**/benchmarks/node_modules/'],
   },
 
   // Base ESLint recommended rules

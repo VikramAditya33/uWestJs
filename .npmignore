@@ -25,8 +25,12 @@ docs/
 
 # Tests
 coverage/
+test/
 *.spec.ts
 *.test.ts
+
+# Benchmarks
+benchmarks/
 
 # Development
 .husky/
